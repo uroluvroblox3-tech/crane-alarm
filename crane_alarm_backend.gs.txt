@@ -474,13 +474,16 @@ function sendLineAlert(message, target, alerts) {
   if (!token) {
     return { ok: false, error: 'no_line_token_configured', note: 'บันทึก log สำเร็จ แต่ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN ใน Script Properties จึงยังส่ง LINE ไม่ได้' };
   }
-  if (!target) {
-    return { ok: false, error: 'no_target', note: 'ยังไม่ได้ระบุ LINE Target ID ในหน้าตั้งค่าระบบของแดชบอร์ด' };
-  }
 
-  const payload = { to: target, messages: [{ type: 'text', text: (message || '').slice(0, 4900) }] };
+  // ถ้าไม่ระบุ target ให้ Broadcast ไปหาทุกคนที่แอด LINE OA นี้เป็นเพื่อน
+  // (ถ้าระบุ target ไว้ ให้ Push ไปหา User/Group ID นั้นโดยเฉพาะ)
+  const isBroadcast = !target;
+  const url = isBroadcast ? 'https://api.line.me/v2/bot/message/broadcast' : 'https://api.line.me/v2/bot/message/push';
+  const payload = isBroadcast
+    ? { messages: [{ type: 'text', text: (message || '').slice(0, 4900) }] }
+    : { to: target, messages: [{ type: 'text', text: (message || '').slice(0, 4900) }] };
 
-  const response = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+  const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
     headers: { Authorization: 'Bearer ' + token },
