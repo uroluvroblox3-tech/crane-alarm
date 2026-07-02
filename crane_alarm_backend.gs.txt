@@ -1,0 +1,560 @@
+/**
+ * ===================================================================
+ *  Crane Inspection Alarm — Google Apps Script Backend (v3, API-only)
+ * ===================================================================
+ *  สถาปัตยกรรมปัจจุบัน: ไฟล์นี้ทำหน้าที่เป็น "API เบื้องหลัง" เท่านั้น —
+ *  หน้าเว็บ (crane_inspection_dashboard.html) ถูก host แยกต่างหาก (เช่น
+ *  GitHub Pages, Netlify, เว็บโฮสต์อื่น) ไม่ใช้ลิงก์ script.google.com
+ *  เป็น URL หลักของเว็บอีกต่อไป — ตัวหน้าเว็บจะยิง fetch() มาที่ URL
+ *  "/exec" ของ deployment นี้ผ่านช่อง "Webhook URL" ในปุ่ม "ตั้งค่าระบบ"
+ *
+ *  หน้าที่ของสคริปต์นี้:
+ *  1. เก็บ "บันทึกว่าตรวจแล้ว" (overrides) ไว้ในแท็บ "overrides" — เก็บแค่สถานะล่าสุด
+ *     และเก็บ "ประวัติการตรวจทุกครั้ง" แยกไว้ในแท็บ "history" (ไม่ทับของเก่า ดูย้อนหลังได้)
+ *     รูปถ่ายหลักฐานการตรวจ (ถ้ามี) จะถูกอัปโหลดไปไว้ในโฟลเดอร์ Google Drive ชื่อ
+ *     "Crane Alarm Photos" อัตโนมัติ (สร้างให้เองครั้งแรกที่มีการแนบรูป)
+ *  2. เก็บ "แผนเข้าตรวจล่วงหน้า" ไว้ในแท็บ "plans"
+ *  3. เป็นตัวกลางส่งข้อความแจ้งเตือนไปยัง LINE Messaging API
+ *     (Channel Access Token เก็บไว้ฝั่งนี้เท่านั้น ไม่หลุดไปที่เบราว์เซอร์)
+ *  4. (ทางเลือก) ยังมีฟังก์ชัน doGet() เหลืออยู่เผื่ออยากเปิดดูหน้าเว็บผ่าน
+ *     URL ของ Apps Script โดยตรง แต่ไม่จำเป็นต้องใช้ในสถาปัตยกรรมนี้
+ *
+ *  วิธีติดตั้ง (ทำครั้งเดียว):
+ *  ----------------------------------------------------------------
+ *  1. ไปที่ https://script.google.com -> สร้างโครงการใหม่ (New project)
+ *  2. ลบโค้ดเปล่าเริ่มต้นทั้งหมด แล้ววางโค้ดทั้งไฟล์นี้แทน
+ *  3. กด "บันทึก" (Save) ตั้งชื่อโครงการ เช่น "Crane Alarm Backend"
+ *  4. รัน setup ครั้งแรกเพื่อสร้างชีตและใส่ข้อมูลเริ่มต้น:
+ *     - เลือกฟังก์ชัน "setupInitialData" จาก dropdown ด้านบน (ข้าง Run/Debug)
+ *     - กด "Run" (รูปสามเหลี่ยม) — ครั้งแรกจะขอ Authorize สิทธิ์ กด "Authorize access"
+ *       เลือกบัญชี Google ของคุณ ถ้ามีหน้าเตือน "Google hasn't verified this app"
+ *       ให้กด Advanced -> Go to [ชื่อโครงการ] (unsafe) ได้ตามปกติ เพราะเป็นสคริปต์ของคุณเอง
+ *       (รายการสิทธิ์จะรวมถึง "เห็น แก้ไข สร้าง และลบไฟล์ Google Drive ของคุณ" — ใช้สำหรับ
+ *       เก็บรูปถ่ายหลักฐานการตรวจที่แนบมาจากแดชบอร์ดเท่านั้น)
+ *     - รันเสร็จแล้วจะมี Google Sheet ใหม่ชื่อ "Crane Alarm Data" ในไดรฟ์ของคุณ
+ *       พร้อมแท็บ "master" ที่มีข้อมูลเครน 51 แถวเริ่มต้น (จากไฟล์ Excel ที่ให้มา)
+ *  5. ตั้งค่า Channel Access Token ของ LINE (ถ้ามีแล้ว):
+ *     - เมนูซ้าย คลิก "Project Settings" (รูปเฟือง)
+ *     - เลื่อนลงไปที่ "Script Properties" -> "Add script property"
+ *     - Property: LINE_CHANNEL_ACCESS_TOKEN   Value: <ใส่ token ของคุณ>
+ *     - (ถ้ายังไม่มี LINE Official Account ข้ามขั้นนี้ไปก่อนได้ ระบบจะยังใช้งานส่วนอื่นได้ปกติ)
+ *  6. กด "Deploy" (มุมขวาบน) -> "New deployment"
+ *     - Select type: เลือก "Web app"
+ *     - Execute as: "Me"
+ *     - Who has access: "Anyone"  (สำคัญ — ต้องเป็น Anyone ไม่ใช่ Anyone with Google account)
+ *     - กด "Deploy" แล้ว Authorize อีกครั้งถ้าถูกขอ
+ *  7. คัดลอก "Web app URL" ที่ได้ (ขึ้นต้นด้วย https://script.google.com/macros/s/.../exec)
+ *     -> เอาไปวางในช่อง "Webhook URL" ที่ปุ่ม "ตั้งค่าระบบ" ของหน้าเว็บ crane_inspection_dashboard.html
+ *        ที่ host แยกไว้อีกที่หนึ่ง แล้วกด Save
+ *
+ *  การแก้ไขรายชื่อเครนต่อจากนี้:
+ *  ----------------------------------------------------------------
+ *  เปิด Google Sheet "Crane Alarm Data" -> แท็บ "master" -> แก้/เพิ่ม/ลบแถวได้เลย
+ *  คอลัมน์ต้องตรงกับหัวตาราง (กอง, ฝ่าย, ชนิดของปั้นจั่น, พิกัดการยกน้ำหนัก (ตัน),
+ *  สถานที่ตั้ง, ยี่ห้อ, Serial No., วันที่ทดสอบ, วันที่หมดอายุ, หมายเหตุ)
+ *  รูปแบบวันที่ต้องเป็น "D เดือนย่อ. ปี พ.ศ." เช่น "9 ธ.ค. 2568"
+ *  (หมายเหตุ: หน้าเว็บเวอร์ชันปัจจุบันยังไม่ได้ดึง "master" จาก Sheet นี้อัตโนมัติ
+ *  — ใช้ชุดข้อมูลตั้งต้นที่ฝังในไฟล์ HTML เป็นหลัก ถ้าต้องการให้ดึงจาก Sheet สด บอกได้)
+ *
+ *  ทุกครั้งที่แก้โค้ดนี้ ต้องกด Deploy
+ *  -> "Manage deployments" -> แก้ไข (ไอคอนดินสอ) -> เปลี่ยน Version เป็น "New version"
+ *  -> Deploy ใหม่ (URL เดิมยังใช้ได้)
+ * ===================================================================
+ */
+
+const SHEET_NAME_MASTER = 'master';
+const SHEET_NAME_OVERRIDES = 'overrides';
+const SHEET_NAME_HISTORY = 'history';
+const SHEET_NAME_LOG = 'alert_log';
+const SHEET_NAME_PLANS = 'plans';
+const SPREADSHEET_NAME = 'Crane Alarm Data';
+const PHOTOS_FOLDER_NAME = 'Crane Alarm Photos';
+
+const MASTER_HEADER = ['กอง','ฝ่าย','ชนิดของปั้นจั่น','พิกัดการยกน้ำหนัก (ตัน)','สถานที่ตั้ง','ยี่ห้อ','Serial No.','วันที่ทดสอบ','วันที่หมดอายุ','หมายเหตุ'];
+
+// ---------- One-time setup ----------
+function setupInitialData() {
+  const ss = getOrCreateSpreadsheet();
+  const masterSheet = getSheet(ss, SHEET_NAME_MASTER);
+  if (masterSheet.getDataRange().getNumRows() <= 1) {
+    const seedRows = getSeedRows();
+    masterSheet.getRange(1, 1, seedRows.length, MASTER_HEADER.length).setValues(seedRows);
+    masterSheet.setFrozenRows(1);
+    masterSheet.getRange(1, 1, 1, MASTER_HEADER.length).setFontWeight('bold');
+    masterSheet.autoResizeColumns(1, MASTER_HEADER.length);
+  }
+  getSheet(ss, SHEET_NAME_OVERRIDES);
+  getSheet(ss, SHEET_NAME_HISTORY);
+  getSheet(ss, SHEET_NAME_LOG);
+  getSheet(ss, SHEET_NAME_PLANS);
+  Logger.log('Setup complete. Spreadsheet URL: ' + ss.getUrl());
+}
+
+function getOrCreateSpreadsheet() {
+  const props = PropertiesService.getScriptProperties();
+  const existingId = props.getProperty('SPREADSHEET_ID');
+  if (existingId) {
+    try { return SpreadsheetApp.openById(existingId); } catch (e) { /* fall through to create new */ }
+  }
+  const ss = SpreadsheetApp.create(SPREADSHEET_NAME);
+  props.setProperty('SPREADSHEET_ID', ss.getId());
+  return ss;
+}
+
+// ---------- Entry points ----------
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonResponse({ ok: false, error: 'invalid_json' });
+  }
+
+  const action = body.action;
+  try {
+    if (action === 'get_master_data') return jsonResponse(getMasterData());
+    if (action === 'get_overrides') return jsonResponse(getOverrides());
+    if (action === 'save_override') return jsonResponse(saveOverride(body.id, body.override, body.meta));
+    if (action === 'get_history') return jsonResponse(getHistory(body.id));
+    if (action === 'delete_override') return jsonResponse(deleteOverride(body.id));
+    if (action === 'clear_all_overrides') return jsonResponse(clearAllOverrides());
+    if (action === 'send_line_alert') return jsonResponse(sendLineAlert(body.message, body.target, body.alerts));
+    if (action === 'get_sheet_url') return jsonResponse({ ok: true, url: getOrCreateSpreadsheet().getUrl() });
+    if (action === 'get_plans') return jsonResponse(getPlans());
+    if (action === 'save_plan') return jsonResponse(savePlan(body.id, body.plan));
+    if (action === 'delete_plan') return jsonResponse(deletePlan(body.id));
+    return jsonResponse({ ok: false, error: 'unknown_action' });
+  } catch (err) {
+    return jsonResponse({ ok: false, error: String(err) });
+  }
+}
+
+function doGet(e) {
+  // เสิร์ฟหน้าแดชบอร์ดเป็นหน้าเว็บโดยตรง — ทำให้ URL เดียวกันนี้เป็นทั้ง
+  // "ลิงก์เปิดแดชบอร์ด" และ "Webhook" สำหรับบันทึกข้อมูล/ส่ง LINE ในตัวเดียว
+  //
+  // หมายเหตุสำคัญ: Apps Script จะ redirect หน้า HTML ไปแสดงผลที่โดเมน
+  // script.googleusercontent.com เสมอ (ไม่ใช่ /exec ตรงๆ) ทำให้ location.href
+  // ในเบราว์เซอร์ไม่ใช่ URL จริงที่ใช้ยิง POST ได้ จึงต้องฝัง URL จริงของตัวเอง
+  // (ScriptApp.getService().getUrl()) เข้าไปในหน้าเว็บตรงนี้แทน
+  const template = HtmlService.createTemplateFromFile('Dashboard');
+  template.selfExecUrl = ScriptApp.getService().getUrl();
+  return template.evaluate()
+    .setTitle('Crane Inspection Alarm')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---------- Sheet helpers ----------
+function getSheet(ss, name) {
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    if (name === SHEET_NAME_MASTER) {
+      sheet.appendRow(MASTER_HEADER);
+    } else if (name === SHEET_NAME_OVERRIDES) {
+      sheet.appendRow(['id', 'test_date_th', 'expire_date_th', 'expire_iso', 'note', 'inspector_name', 'photo_url', 'recorded_at']);
+    } else if (name === SHEET_NAME_HISTORY) {
+      sheet.appendRow(['recorded_at', 'id', 'type', 'location', 'test_date_th', 'expire_date_th', 'expire_iso', 'note', 'inspector_name', 'photo_url']);
+    } else if (name === SHEET_NAME_LOG) {
+      sheet.appendRow(['sent_at', 'target', 'alert_count', 'message_preview']);
+    } else if (name === SHEET_NAME_PLANS) {
+      sheet.appendRow(['id', 'site', 'planned_date', 'inspector', 'note', 'status', 'created_at']);
+    }
+  }
+  return sheet;
+}
+function masterSheet() { return getSheet(getOrCreateSpreadsheet(), SHEET_NAME_MASTER); }
+function overridesSheet() { return getSheet(getOrCreateSpreadsheet(), SHEET_NAME_OVERRIDES); }
+function historySheet() { return getSheet(getOrCreateSpreadsheet(), SHEET_NAME_HISTORY); }
+function logSheet() { return getSheet(getOrCreateSpreadsheet(), SHEET_NAME_LOG); }
+function plansSheet() { return getSheet(getOrCreateSpreadsheet(), SHEET_NAME_PLANS); }
+
+// ---------- Thai date parsing ----------
+const THAI_MONTHS = {
+  'ม.ค.':1,'ก.พ.':2,'มี.ค.':3,'เม.ย.':4,'พ.ค.':5,'มิ.ย.':6,
+  'ก.ค.':7,'ส.ค.':8,'ก.ย.':9,'ต.ค.':10,'พ.ย.':11,'ธ.ค.':12
+};
+const THAI_MONTH_PATTERN = Object.keys(THAI_MONTHS).map(function(m){ return m.replace(/\./g,'\\.'); }).join('|');
+
+function parseThaiDateRaw(s) {
+  if (s === null || s === undefined || s === '') return null;
+  const str = String(s).trim().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+  const re = new RegExp('(\\d{1,2})\\s+(' + THAI_MONTH_PATTERN + ')\\s+(\\d{4})');
+  const m = str.match(re);
+  if (!m) return null;
+  const day = parseInt(m[1], 10), mon = THAI_MONTHS[m[2]], yearBE = parseInt(m[3], 10);
+  if (!mon) return null;
+  const yearCE = yearBE - 543;
+  const d = new Date(yearCE, mon - 1, day);
+  if (d.getFullYear() !== yearCE || d.getMonth() !== mon - 1 || d.getDate() !== day) return null;
+  return d;
+}
+
+function fmtThaiDate(d) {
+  if (!d) return null;
+  const inv = {};
+  Object.keys(THAI_MONTHS).forEach(function(k){ inv[THAI_MONTHS[k]] = k; });
+  return d.getDate() + ' ' + inv[d.getMonth() + 1] + ' ' + (d.getFullYear() + 543);
+}
+
+function cleanRating(r) {
+  if (r === null || r === undefined) return '';
+  return String(r).trim().replace(/\u00a0/g, '');
+}
+
+function isoDate(d) {
+  if (!d) return null;
+  const y = d.getFullYear(), m = ('0' + (d.getMonth() + 1)).slice(-2), day = ('0' + d.getDate()).slice(-2);
+  return y + '-' + m + '-' + day;
+}
+
+// ---------- Master data: read raw rows from Sheet, group, apply "earliest date wins" rule ----------
+function getMasterData() {
+  const sheet = masterSheet();
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return { ok: true, items: [] };
+
+  const rawRows = [];
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i];
+    if (!r[2] && !r[4]) continue; // skip fully blank rows (no type, no location)
+    rawRows.push({
+      div: r[0], dept: r[1], type: String(r[2] || '').trim(), rating: r[3],
+      location: String(r[4] || '').trim(), brand: r[5], serial: r[6],
+      test_date: r[7], expire_date: r[8], note: r[9] || null,
+    });
+  }
+
+  const groups = {};
+  const order = [];
+  rawRows.forEach(function(row) {
+    const key = row.type + '||' + row.location;
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(row);
+  });
+
+  const items = order.map(function(key) {
+    const rows = groups[key];
+    const parsed = rows.map(function(r) {
+      return { row: r, expireDate: parseThaiDateRaw(r.expire_date), testDate: parseThaiDateRaw(r.test_date) };
+    });
+    const withDate = parsed.filter(function(p){ return p.expireDate; });
+    let earliestRow, earliestDate;
+    if (withDate.length > 0) {
+      withDate.sort(function(a, b){ return a.expireDate - b.expireDate; });
+      earliestRow = withDate[0].row;
+      earliestDate = withDate[0].expireDate;
+    } else {
+      earliestRow = rows[0];
+      earliestDate = null;
+    }
+    const ratings = uniq(rows.map(function(r){ return cleanRating(r.rating); }).filter(Boolean)).sort();
+    const brands = uniq(rows.map(function(r){ return String(r.brand || '').trim(); }));
+    const serials = uniq(rows.map(function(r){ return String(r.serial || '').trim(); })).sort();
+    const notes = rows.map(function(r){ return r.note; }).filter(function(n){ return n && String(n).trim() !== ''; });
+    const allExpireDates = parsed.map(function(p){ return p.expireDate ? fmtThaiDate(p.expireDate) : (p.row.expire_date || null); }).filter(Boolean);
+
+    return {
+      type: earliestRow.type,
+      location: earliestRow.location,
+      div: earliestRow.div,
+      dept: earliestRow.dept,
+      rating: ratings.join(' / '),
+      brand: brands.join(' / '),
+      serial: serials.join(' / '),
+      test_date: fmtThaiDate(parseThaiDateRaw(earliestRow.test_date)) || earliestRow.test_date || null,
+      expire_date: earliestDate ? fmtThaiDate(earliestDate) : (earliestRow.expire_date || null),
+      expire_iso: earliestDate ? isoDate(earliestDate) : null,
+      multi_date: rows.length > 1,
+      n_records: rows.length,
+      all_expire_dates: allExpireDates,
+      note: notes.length ? notes.join(' | ') : null,
+    };
+  });
+
+  return { ok: true, items: items };
+}
+
+function uniq(arr) {
+  const seen = {}; const out = [];
+  arr.forEach(function(x){ if (!seen[x]) { seen[x] = true; out.push(x); } });
+  return out;
+}
+
+// ---------- Overrides (shared "mark as inspected" records) ----------
+function getOverrides() {
+  const sheet = overridesSheet();
+  const rows = sheet.getDataRange().getValues();
+  const overrides = {};
+  for (let i = 1; i < rows.length; i++) {
+    const id = rows[i][0];
+    if (!id) continue;
+    overrides[id] = {
+      test_date_th: rows[i][1], expire_date_th: rows[i][2], expire_iso: rows[i][3],
+      note: rows[i][4] || null, inspector_name: rows[i][5] || null, photo_url: rows[i][6] || null,
+      recorded_at: rows[i][7],
+    };
+  }
+  return { ok: true, overrides: overrides };
+}
+
+function saveOverride(id, override, meta) {
+  if (!id || !override) return { ok: false, error: 'missing_id_or_override' };
+  meta = meta || {};
+
+  let photoUrl = null;
+  if (meta.photo_base64) {
+    try {
+      photoUrl = uploadPhotoToDrive(meta.photo_base64, meta.photo_mime || 'image/jpeg', id);
+    } catch (err) {
+      // อัปโหลดรูปไม่สำเร็จ ไม่ควรทำให้การบันทึกหลักล้มเหลวไปด้วย — บันทึกต่อโดยไม่มีรูป
+      photoUrl = null;
+    }
+  }
+
+  const recordedAt = override.recorded_at || new Date().toISOString();
+  const inspectorName = meta.inspector_name || '';
+
+  // 1) อัปเดต/เพิ่มแถวใน "overrides" — เก็บแค่สถานะล่าสุดของแต่ละเครน (เร็วต่อการอ่าน)
+  const sheet = overridesSheet();
+  const rows = sheet.getDataRange().getValues();
+  let rowIndex = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === id) { rowIndex = i + 1; break; }
+  }
+  const rowData = [
+    id,
+    override.test_date_th || '',
+    override.expire_date_th || '',
+    override.expire_iso || '',
+    override.note || '',
+    inspectorName,
+    photoUrl || '',
+    recordedAt,
+  ];
+  if (rowIndex > 0) {
+    sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+
+  // 2) เพิ่มแถวใหม่ใน "history" เสมอ — ไม่ทับของเก่า เก็บไว้ดูประวัติย้อนหลังได้ทุกครั้ง
+  historySheet().appendRow([
+    recordedAt, id, meta.type || '', meta.location || '',
+    override.test_date_th || '', override.expire_date_th || '', override.expire_iso || '',
+    override.note || '', inspectorName, photoUrl || '',
+  ]);
+
+  return { ok: true, photo_url: photoUrl };
+}
+
+function getHistory(id) {
+  if (!id) return { ok: false, error: 'missing_id' };
+  const sheet = historySheet();
+  const rows = sheet.getDataRange().getValues();
+  const records = [];
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][1] !== id) continue;
+    records.push({
+      recorded_at: rows[i][0], id: rows[i][1], type: rows[i][2], location: rows[i][3],
+      test_date_th: rows[i][4], expire_date_th: rows[i][5], expire_iso: rows[i][6],
+      note: rows[i][7] || null, inspector_name: rows[i][8] || null, photo_url: rows[i][9] || null,
+    });
+  }
+  records.sort((a, b) => (a.recorded_at < b.recorded_at ? 1 : -1)); // ใหม่สุดก่อน
+  return { ok: true, records: records };
+}
+
+// ---------- Site visit plans (advance scheduling) ----------
+function getPlans() {
+  const sheet = plansSheet();
+  const rows = sheet.getDataRange().getValues();
+  const plans = [];
+  for (let i = 1; i < rows.length; i++) {
+    const id = rows[i][0];
+    if (!id) continue;
+    plans.push({
+      id: id, site: rows[i][1], planned_date: rows[i][2], inspector: rows[i][3] || null,
+      note: rows[i][4] || null, status: rows[i][5] || 'planned', created_at: rows[i][6],
+    });
+  }
+  return { ok: true, plans: plans };
+}
+
+function savePlan(id, plan) {
+  if (!id || !plan) return { ok: false, error: 'missing_id_or_plan' };
+  const sheet = plansSheet();
+  const rows = sheet.getDataRange().getValues();
+  let rowIndex = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === id) { rowIndex = i + 1; break; }
+  }
+  const rowData = [
+    id, plan.site || '', plan.planned_date || '', plan.inspector || '',
+    plan.note || '', plan.status || 'planned', plan.created_at || new Date().toISOString(),
+  ];
+  if (rowIndex > 0) {
+    sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+  return { ok: true };
+}
+
+function deletePlan(id) {
+  if (!id) return { ok: false, error: 'missing_id' };
+  const sheet = plansSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === id) {
+      sheet.deleteRow(i + 1);
+      return { ok: true, deleted: true };
+    }
+  }
+  return { ok: true, deleted: false };
+}
+
+// ---------- Photo storage (Google Drive) ----------
+function getOrCreatePhotosFolder() {
+  const props = PropertiesService.getScriptProperties();
+  const existingId = props.getProperty('PHOTOS_FOLDER_ID');
+  if (existingId) {
+    try { return DriveApp.getFolderById(existingId); } catch (e) { /* fall through */ }
+  }
+  const folder = DriveApp.createFolder(PHOTOS_FOLDER_NAME);
+  props.setProperty('PHOTOS_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function uploadPhotoToDrive(base64Data, mimeType, idHint) {
+  const folder = getOrCreatePhotosFolder();
+  const bytes = Utilities.base64Decode(base64Data);
+  const ext = mimeType.indexOf('png') > -1 ? 'png' : 'jpg';
+  const safeName = String(idHint || 'photo').replace(/[^a-zA-Z0-9ก-๙_-]/g, '_').slice(0, 60);
+  const filename = safeName + '_' + new Date().getTime() + '.' + ext;
+  const blob = Utilities.newBlob(bytes, mimeType, filename);
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const fileId = file.getId();
+  return 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1000';
+}
+
+function deleteOverride(id) {
+  if (!id) return { ok: false, error: 'missing_id' };
+  const sheet = overridesSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === id) {
+      sheet.deleteRow(i + 1);
+      return { ok: true, deleted: true };
+    }
+  }
+  return { ok: true, deleted: false }; // ไม่พบแถวนี้ ถือว่าไม่มีอะไรต้องลบ ไม่ใช่ error
+}
+
+function clearAllOverrides() {
+  const sheet = overridesSheet();
+  const numRows = sheet.getDataRange().getNumRows();
+  if (numRows > 1) {
+    sheet.deleteRows(2, numRows - 1);
+  }
+  return { ok: true };
+}
+
+// ---------- LINE alert relay ----------
+function sendLineAlert(message, target, alerts) {
+  const token = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ACCESS_TOKEN');
+  logAlert(target, (alerts || []).length, message);
+
+  if (!token) {
+    return { ok: false, error: 'no_line_token_configured', note: 'บันทึก log สำเร็จ แต่ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN ใน Script Properties จึงยังส่ง LINE ไม่ได้' };
+  }
+  if (!target) {
+    return { ok: false, error: 'no_target', note: 'ยังไม่ได้ระบุ LINE Target ID ในหน้าตั้งค่าระบบของแดชบอร์ด' };
+  }
+
+  const payload = { to: target, messages: [{ type: 'text', text: (message || '').slice(0, 4900) }] };
+
+  const response = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + token },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+
+  const status = response.getResponseCode();
+  if (status === 200) return { ok: true };
+  return { ok: false, error: 'line_api_error', status: status, body: response.getContentText() };
+}
+
+function logAlert(target, alertCount, message) {
+  try {
+    logSheet().appendRow([new Date().toISOString(), target || '(ไม่ระบุ)', alertCount, (message || '').slice(0, 200)]);
+  } catch (e) {
+    // ไม่ critical ถ้า log ไม่สำเร็จ ไม่ต้อง throw
+  }
+}
+
+// ---------- Seed data (รายชื่อเครนเริ่มต้นจากไฟล์ Excel ที่ให้มา) ----------
+function getSeedRows() {
+  return [
+  ["กอง", "ฝ่าย", "ชนิดของปั้นจั่น", "พิกัดการยกน้ำหนัก (ตัน)", "สถานที่ตั้ง", "ยี่ห้อ", "Serial No.", "วันที่ทดสอบ", "วันที่หมดอายุ", "หมายเหตุ"],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 20, "Boiler Feed Pumps Unit 1 No.1", "Donati/Italia : 2019", 76242, "9 ธ.ค. 2568", "9 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 20, "Boiler Feed Pumps Unit 1 No.2", "Donati/Italia : 2019", 76243, "9 ธ.ค. 2568", "9 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 20, "Boiler Feed Pumps Unit 2 No.1", "Donati/Italia : 2019", 76246, "10 ธ.ค. 2568", "10 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 20, "Boiler Feed Pumps Unit 2 No.2", "Donati/Italia : 2019", 76247, "10 ธ.ค. 2568", "10 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "CCCW Heat Exchanger Generation Building Unit 1 No.1", "Demag/Germany : 2019", 100053999, "5 เม.ย. 2568", "5 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "CCCW Heat Exchanger Generation Building Unit 2 No.1", "Demag/Germany : 2019", 100053621, "3 เม.ย. 2568", "3 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "CCCW Heat Exchanger Generation Building Unit 1 No.2", "Demag/Germany : 2019", 100053629, "3 เม.ย. 2568", "3 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "CCCW Heat Exchanger Generation Building Unit 2 No.2", "Demag/Germany : 2019", 100034156, "3 เม.ย. 2568", "3 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Circulation Water Chlorination Building", "Demag/Germany : 2019", 100053620, "9 เม.ย. 2568", "9 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 8, "Close Cycle Cooling Water Pump Generation Building Unit 1 No.1", "Demag/Germany : 2019", 100086929, "11 ก.ย. 2568", "12 มี.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 8, "Close Cycle Cooling Water Pump Generation Building Unit 1 No.2", "Demag/Germany : 2019", 100073290, "11 ก.ย. 2568", "12 มี.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 8, "Close Cycle Cooling Water Pump Generation Building Unit 2 No.1", "Demag/Germany : 2019", 100073289, "15 ธ.ค. 2568", "15 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 8, "Close Cycle Cooling Water Pump Generation Building Unit 2 No.2", "Demag/Germany : 2019", 100089506, "12 ธ.ค. 2568", "12 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 10, "Condensate Pump Generation Building Unit 1 No.1", "Demag/Germany : 2019", 100090825, "11 ก.ย. 2568", "12 มี.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 8, "Condensate Pump Generation Building Unit 1 No.2", "Donati/Italia : 2019", 77293, "11 ก.ย. 2568", "12 มี.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 10, "Condensate Pump Generation Building Unit 2 No.1", "Demag/Germany : 2019", 100073168, "11 ธ.ค. 2568", "11 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 10, "Condensate Pump Generation Building Unit 2 No.2", "Demag/Germany : 2019", 100074796, "12 ธ.ค. 2568", "12 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Jib crane", 1.6, "Cooling Tower 11", "Verlinde/France : 2019", 100076725, "11 ธ.ค. 2568", "11 ธ.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Jib crane", 1.6, "Cooling Tower 12", "Verlinde/France : 2019", 100076725, "6 มี.ค. 2567", "6 มี.ค. 2568", "แขวน Tag ห้ามใช้งาน"],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 3, "Diesel Driven Fire Pump", "Demag/Germany : 2019", 58973928, "9 ก.ย. 2567", "9 ก.ย. 2568", "รอ หลักฐานการแขวน Tag ห้ามใช้งาน"],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 5, "Electric Motor Driven Fire Pump", "Demag/Germany : 2020", 100870595, "12 ธ.ค. 2568", "12 ธ.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", " 20/4", "Fuel Gas Compressor Building", "Stahl/Germany : 2018", 180084, "10 ก.ย. 2568", "11 มี.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "General Circuit Breaker Unit 1", "Donati/Italia : 2021", 97260, "8 เม.ย. 2568", "8 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "General Circuit Breaker Unit 2", "Donati/Italia : 2021", 97258, "8 เม.ย. 2568", "8 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", "5/", "GIS Building", "Stahl/Germany : 2018", 180082, "11 ธ.ค. 2568", "11 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", "/1", "GIS Building", "Stahl/Germany : 2018", 180082, "11 ธ.ค. 2568", "11 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 5, "HP/IP/LP Bypass Valve Generation Building Unit 1", "Donati/Italia : 2019", 77283, "11 ก.ย. 2568", "12 มี.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 5, "HP/IP/LP Bypass Valve Generation Building Unit 2", "Donati/Italia : 2019", 76239, "11 ธ.ค. 2568", "11 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Jib crane", 1, "JIB HRSG Unit 1", "Harrington/Japan: 2017", 27441, "5 เม.ย. 2568", "5 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Jib crane", 1, "JIB HRSG Unit 2", "Harrington/Japan: 2017", 27444, "5 เม.ย. 2568", "5 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 5, "Liquid Fuel & Water Injection", "Demag/Germany : 2019", 100223522, "12 ธ.ค. 2568", "12 ธ.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", "130/ - / -", "Turbine Hall Bridge Crane GT11", "Demag/Germany : 2018", "180081-1", "4 ก.ย. 2568", "4 ธ.ค. 2568", "ทดสอบแล้วเมื่อ ธ.ค. 68 ผลเบื้องต้นพร้อมใช้งาน (รอ รายงานฉบับจริง)"],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", " -  /30/5", "Turbine Hall Bridge Crane GT11", "Demag/Germany : 2018", "180081-1", "4 ก.ย. 2568", "5 มี.ค. 2569", "ทดสอบแล้วเมื่อ ธ.ค. 68 ผลเบื้องต้นพร้อมใช้งาน (รอ รายงานฉบับจริง)"],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", "130/ - / -", "Turbine Hall Bridge Crane GT12", "Stahl/Germany : 2018", "180083-1", "9 ม.ค. 2569", "10 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", " - /30/ 5", "Turbine Hall Bridge Crane GT12", "Stahl/Germany : 2018", "180083-1", "9 ม.ค. 2569", "10 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", "130/ - / -", "Turbine Hall Bridge Crane ST11", "Stahl/Germany : 2018", "180081-2", "4 ก.ย. 2568", "4 ธ.ค. 2568", "ทดสอบแล้วเมื่อ ธ.ค. 68 ผลเบื้องต้นพร้อมใช้งาน (รอ รายงานฉบับจริง)"],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", " - /30/5", "Turbine Hall Bridge Crane ST11", "Stahl/Germany : 2018", "180081-2", "4 ก.ย. 2568", "4 ธ.ค. 2568", "ทดสอบแล้วเมื่อ ธ.ค. 68 ผลเบื้องต้นพร้อมใช้งาน (รอ รายงานฉบับจริง)"],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", "130/ - / -", "Turbine Hall Bridge Crane ST12", "Stahl/Germany : 2018", "180083-2", "9 ม.ค. 2569", "10 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", " - /30/5", "Turbine Hall Bridge Crane ST12", "Stahl/Germany : 2018", "180083-2", "9 ม.ค. 2569", "10 ก.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 1 No.1", "Demag/Germany : 2019", 100022027, "5 เม.ย. 2568", "5 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 1 No.2", "Demag/Germany : 2019", 100027527, "2 เม.ย. 2568", "2 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 1 No.3", "Demag/Germany : 2019", 100064053, "9 ก.ย. 2567", "9 ก.ย. 2568", "รอ หลักฐานการแขวน Tag ห้ามใช้งาน"],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 1 No.4", "Demag/Germany : 2019", 100022025, "5 เม.ย. 2568", "5 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 2 No.1", "Demag/Germany : 2019", 100027527, "2 เม.ย. 2568", "2 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 2 No.2", "Demag/Germany : 2019", 100027527, "9 ก.ย. 2567", "9 ก.ย. 2568", "รอ หลักฐานการแขวน Tag ห้ามใช้งาน"],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 2 No.3", "Demag/Germany : 2019", 100023395, "2 เม.ย. 2568", "2 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 2, "Vacuum Pump Motor Generation Building Unit 2 No.4", "Demag/Germany : 2019", 100025839, "2 เม.ย. 2568", "2 เม.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Monorail crane", 5, "Water Treatment Building Decanter Centrifuge", "Demag/Germany : 2019", 100222822, "11 ธ.ค. 2568", "11 มิ.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", " 15/ -", "Cooling Tower Make up Pump House", "Stahl/Germany : 2018", "18008/A1", "10 ก.ย. 2568", "11 มี.ค. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Overhead crane", " - /3", "Cooling Tower Make up Pump House", "Stahl/Germany : 2018", "18008/A1", "10 ก.ย. 2568", "10 ก.ย. 2569", ""],
+  ["กบรก2-ฟ.", "อฟก.", "Electric chain hoist", 0.25, "JIB Filter house Unit 1", "Verlinde/France : 2019", 1801100186, "16 พ.ค. 2567", "16 ", ""]
+  ];
+}

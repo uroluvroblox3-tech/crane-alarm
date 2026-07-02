@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crane Alarm Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Sarabun:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Chart.js & SheetJS -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          dash: {
+            bg: '#080E14',      /* Deepest background */
+            panel: '#101722',   /* Panel background */
+            panelborder: '#1E293B',
+            row: '#151E2B',     /* Table row */
+            rowhover: '#1B2635',
+            text: '#CBD5E1',    /* Default text */
+            muted: '#64748B',   /* Muted text */
+            accent: '#38BDF8',  /* Light blue accent */
+          },
+          status: { 
+            danger: '#EF4444',
+            warning: '#F97316',
+            success: '#10B981',
+            pending: '#D946EF',
+            tagged: '#94A3B8',
+            unknown: '#64748B'
+          }
+        },
+        fontFamily: {
+          sans: ['Sarabun', 'sans-serif'],
+          display: ['Chakra Petch', 'sans-serif'],
+          mono: ['JetBrains Mono', 'monospace'],
+        }
+      }
+    }
+  }
+</script>
+<style>
+  html { scroll-behavior: smooth; }
+  body { background-color: #080E14; color: #CBD5E1; }
+  
+  /* Custom Scrollbar for Dark Theme */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #080E14; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+  /* Outline Badges */
+  .badge-outline { background: transparent; border: 1px solid currentColor; }
+
+  /* View tabs */
+  .view-tab-btn { background: #101722; border-color: #1E293B; color: #64748B; }
+  .view-tab-btn:hover { color: #CBD5E1; }
+  .view-tab-btn.active { background: rgba(56,189,248,0.15); border-color: #38BDF8; color: #38BDF8; }
+
+  /* Smooth expand/collapse for table groups */
+  .group-children { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+  .group-expanded .group-children { max-height: 5000px; }
+  .chevron { transition: transform 0.3s ease; }
+  .group-expanded .chevron { transform: rotate(90deg); }
+
+  /* Dark Modal Overlay */
+  .modal-overlay { opacity: 0; pointer-events: none; transition: opacity 0.2s ease; backdrop-filter: blur(4px); }
+  .modal-overlay.show { opacity: 1; pointer-events: auto; }
+  .modal-content { transform: translateY(20px); transition: transform 0.3s ease; }
+  .modal-overlay.show .modal-content { transform: translateY(0); }
+
+  /* Toggle Switch */
+  .switch { position: relative; display: inline-block; width: 40px; height: 20px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .4s; border-radius: 20px; }
+  .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+  input:checked + .slider { background-color: #38BDF8; }
+  input:checked + .slider:before { transform: translateX(20px); }
+
+  /* Utility */
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  @media print {
+    body { background: white; color: black; }
+    .no-print { display: none !important; }
+    .dash-panel { background: white !important; border: 1px solid #ccc !important; }
+  }
+</style>
+</head>
+<body class="font-sans antialiased pb-10">
+
+<!-- Top Navigation -->
+<header class="bg-dash-panel border-b border-dash-panelborder sticky top-0 z-50 no-print">
+  <div class="px-4 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded bg-blue-500/20 flex items-center justify-center border border-blue-500/50">
+        <svg viewBox="0 0 24 24" class="w-5 h-5 text-dash-accent stroke-current fill-none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          <circle cx="12" cy="12" r="6"/>
+        </svg>
+      </div>
+      <h1 class="text-white font-display font-bold text-xl tracking-wide">Alarm Dashboard</h1>
+    </div>
+    <div class="flex items-center gap-3">
+      <div id="clockBox" class="font-mono text-xs text-dash-muted hidden md:block border border-dash-panelborder px-2 py-1 rounded bg-dash-bg"></div>
+      <button id="exportExcelBtn" class="text-dash-muted hover:text-white transition-colors" title="Export Excel">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h8M8 9h2"/></svg>
+      </button>
+      <button id="testLineBtn" class="text-dash-muted hover:text-dash-accent transition-colors" title="ทดสอบส่ง LINE">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+      </button>
+      <button id="settingsBtn" class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-white bg-slate-800 border border-slate-700 hover:bg-slate-700 rounded transition-colors">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="px-2 sm:px-4 py-4 space-y-4">
+
+  <!-- View Tabs -->
+  <div class="flex gap-2">
+    <button class="view-tab-btn active px-3 py-1.5 text-xs font-semibold rounded border transition-colors" data-view="list">รายการเครน</button>
+    <button class="view-tab-btn px-3 py-1.5 text-xs font-semibold rounded border transition-colors" data-view="plan">แผนเข้าตรวจล่วงหน้า</button>
+    <button class="view-tab-btn px-3 py-1.5 text-xs font-semibold rounded border transition-colors" data-view="history">บันทึกการตรวจแล้ว</button>
+  </div>
+
+  <div id="listView" class="space-y-4">
+
+  <!-- Top KPI Bar -->
+  <div class="flex items-center gap-2 text-sm text-dash-muted mb-2">
+    <span>Crane Inspection Status On: <span class="text-white" id="todayLabel"></span></span>
+  </div>
+
+  <div class="flex gap-4 overflow-x-auto pb-2 hide-scrollbar" id="summaryStrip">
+    <!-- Injected by JS -->
+  </div>
+
+  <!-- Main Table Section -->
+  <div class="bg-dash-panel border border-dash-panelborder rounded-lg overflow-hidden flex flex-col">
+    <div class="px-4 py-3 border-b border-dash-panelborder flex flex-wrap justify-between items-center gap-3 bg-[#131B26]">
+      <div class="text-sm font-semibold text-white flex items-center gap-2">
+        <svg class="w-4 h-4 text-dash-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Alarm List <span class="text-dash-muted font-normal text-xs ml-2">(คลิกที่กลุ่มเพื่อดูรายการย่อย)</span>
+      </div>
+      <div class="flex items-center gap-2 w-full sm:w-auto">
+        <input type="text" id="searchInput" class="bg-dash-bg border border-dash-panelborder rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-dash-accent w-full sm:w-48" placeholder="ค้นหาสถานที่, S/N...">
+        <select id="sortSelect" class="bg-dash-bg border border-dash-panelborder rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-dash-accent cursor-pointer hidden sm:block">
+          <option value="urgency">จัดเรียง: เร่งด่วน</option>
+          <option value="date_asc">หมดอายุก่อน</option>
+          <option value="type">ชนิดเครน</option>
+        </select>
+      </div>
+    </div>
+    
+    <!-- Table Header (Desktop) -->
+    <div class="hidden md:grid grid-cols-12 gap-4 px-4 py-2 border-b border-dash-panelborder bg-[#0B1017] text-xs font-semibold text-dash-muted uppercase tracking-wider">
+      <div class="col-span-3">Alarm Type / Location</div>
+      <div class="col-span-3">Details (S/N, Brand)</div>
+      <div class="col-span-2">Expire Date</div>
+      <div class="col-span-2 text-center">Status</div>
+      <div class="col-span-2 text-center">Action</div>
+    </div>
+
+    <!-- Table Body -->
+    <div id="craneList" class="flex flex-col bg-dash-panel text-sm"></div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="hidden py-12 text-center">
+      <div class="text-dash-muted text-sm">ไม่พบรายการที่ค้นหา</div>
+    </div>
+  </div>
+
+  <!-- Charts Row -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- Equipment Monitoring (Donut) -->
+    <div class="lg:col-span-1 bg-dash-panel border border-dash-panelborder rounded-lg p-4 flex flex-col">
+      <h3 class="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+        <svg class="w-4 h-4 text-dash-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+        Equipment Status
+      </h3>
+      <div class="relative w-full h-[200px] flex-1 flex items-center justify-center">
+        <canvas id="statusChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Alarm Frequency (Area Chart) -->
+    <div class="lg:col-span-2 bg-dash-panel border border-dash-panelborder rounded-lg p-4 flex flex-col">
+      <h3 class="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+        <svg class="w-4 h-4 text-dash-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Expiration Timeline (12 Months)
+      </h3>
+      <div class="relative w-full h-[200px] flex-1">
+        <canvas id="timelineChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  </div>
+  <!-- /listView -->
+
+  <!-- Plan View -->
+  <div id="planView" class="hidden space-y-4">
+    <div class="bg-dash-panel border border-dash-panelborder rounded-lg p-4">
+      <h3 class="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+        <svg class="w-4 h-4 text-dash-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        เพิ่มแผนเข้าตรวจไซต์งาน
+      </h3>
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div class="md:col-span-2">
+          <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">ไซต์ / สถานที่</label>
+          <input type="text" id="planSite" list="planSiteOptions" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent transition-colors" placeholder="เช่น Turbine Hall Unit 1">
+          <datalist id="planSiteOptions"></datalist>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">วันที่นัดเข้าตรวจ</label>
+          <input type="date" id="planDate" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent font-mono" style="color-scheme: dark;">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">ผู้รับผิดชอบ</label>
+          <input type="text" id="planInspector" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent transition-colors">
+        </div>
+        <div class="flex items-end">
+          <button id="addPlanBtn" class="w-full px-3 py-2 text-sm font-semibold text-white bg-dash-accent/20 border border-dash-accent hover:bg-dash-accent hover:text-black rounded transition-colors">+ เพิ่มแผน</button>
+        </div>
+        <div class="md:col-span-5">
+          <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">หมายเหตุ / จุดประสงค์</label>
+          <input type="text" id="planNote" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent transition-colors" placeholder="เช่น ตรวจเครนก่อนหมดอายุ, ตรวจตามแผนประจำเดือน...">
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-dash-panel border border-dash-panelborder rounded-lg overflow-hidden">
+      <div class="px-4 py-3 border-b border-dash-panelborder text-sm font-semibold text-white bg-[#131B26]">
+        รายการนัดหมายทั้งหมด <span class="text-dash-muted font-normal text-xs ml-2">(เรียงจากใกล้ถึงก่อน)</span>
+      </div>
+      <div id="planList" class="flex flex-col text-sm"></div>
+      <div id="planEmptyState" class="hidden py-12 text-center">
+        <div class="text-dash-muted text-sm">ยังไม่มีแผนเข้าตรวจ — เพิ่มแผนใหม่ด้านบน</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- History View -->
+  <div id="historyView" class="hidden space-y-4">
+    <div class="bg-dash-panel border border-dash-panelborder rounded-lg overflow-hidden">
+      <div class="px-4 py-3 border-b border-dash-panelborder flex flex-wrap justify-between items-center gap-3 bg-[#131B26]">
+        <div class="text-sm font-semibold text-white flex items-center gap-2">
+          <svg class="w-4 h-4 text-dash-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          บันทึกการตรวจแล้ว <span class="text-dash-muted font-normal text-xs ml-2">(แจ้งเตือนแล้ว → ตรวจแล้ว พร้อมวันที่และผู้ตรวจ)</span>
+        </div>
+        <input type="text" id="historySearchInput" class="bg-dash-bg border border-dash-panelborder rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-dash-accent w-full sm:w-56" placeholder="ค้นหาสถานที่, ผู้ตรวจ...">
+      </div>
+      <div id="historyLogList" class="flex flex-col text-sm"></div>
+      <div id="historyEmptyState" class="hidden py-12 text-center">
+        <div class="text-dash-muted text-sm">ยังไม่มีรายการที่บันทึกว่าตรวจแล้ว</div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Modals (Dark Theme) -->
+<!-- Inspect Modal -->
+<div id="inspectOverlay" class="modal-overlay fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70">
+  <div class="modal-content bg-dash-panel border border-dash-panelborder rounded-lg shadow-2xl w-full max-w-md overflow-hidden">
+    <div class="p-4 border-b border-dash-panelborder flex justify-between items-center bg-[#131B26]">
+      <div>
+        <h2 class="font-display font-bold text-white text-lg">บันทึกผลตรวจสอบ</h2>
+        <p id="inspectSub" class="text-xs text-dash-muted mt-0.5 line-clamp-1"></p>
+      </div>
+      <button class="modal-close-inspect text-dash-muted hover:text-white transition-colors">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">ชื่อผู้ตรวจสอบ</label>
+        <input type="text" id="inspectInspector" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent transition-colors">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">วันที่ตรวจ</label>
+          <input type="date" id="inspectDate" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent font-mono" style="color-scheme: dark;">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">รับรอง (เดือน)</label>
+          <input type="number" id="inspectMonths" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent font-mono">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">หมายเหตุ</label>
+        <input type="text" id="inspectNote" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent transition-colors" placeholder="...">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">รูปถ่าย (ย่อให้อัตโนมัติ)</label>
+        <input type="file" id="inspectPhoto" accept="image/*" capture="environment" class="w-full text-xs text-dash-muted file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-white hover:file:bg-slate-700 cursor-pointer">
+        <p id="inspectPhotoHint" class="text-[11px] text-dash-accent mt-1"></p>
+        <img id="inspectPhotoPreview" class="hidden mt-2 max-h-32 rounded border border-dash-panelborder object-cover">
+      </div>
+    </div>
+
+    <div class="p-4 border-t border-dash-panelborder flex justify-end gap-2 bg-[#131B26]">
+      <button class="modal-close-inspect px-4 py-1.5 text-sm text-dash-muted hover:text-white transition-colors">ยกเลิก</button>
+      <button id="confirmInspect" class="px-4 py-1.5 text-sm font-semibold text-white bg-dash-accent/20 border border-dash-accent hover:bg-dash-accent hover:text-black rounded transition-colors">บันทึกข้อมูล</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsOverlay" class="modal-overlay fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70">
+  <div class="modal-content bg-dash-panel border border-dash-panelborder rounded-lg shadow-2xl w-full max-w-md overflow-hidden">
+    <div class="p-4 border-b border-dash-panelborder flex justify-between items-center bg-[#131B26]">
+      <div>
+        <h2 class="font-display font-bold text-white text-lg">System Settings</h2>
+      </div>
+      <button class="modal-close-settings text-dash-muted hover:text-white transition-colors">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">Webhook URL (Apps Script /exec)</label>
+        <input type="text" id="webhookUrl" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-dash-muted focus:text-white focus:outline-none focus:border-dash-accent font-mono transition-colors" placeholder="https://script.google.com/macros/s/xxxx/exec">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-dash-muted mb-1 uppercase tracking-wider">LINE Target ID <span class="normal-case opacity-70">(เว้นว่างเพื่อ Broadcast)</span></label>
+        <input type="text" id="lineTarget" class="w-full px-3 py-2 bg-dash-bg border border-dash-panelborder rounded text-sm text-white focus:outline-none focus:border-dash-accent font-mono transition-colors">
+      </div>
+      <div class="flex items-center justify-between p-3 bg-dash-bg rounded border border-dash-panelborder">
+        <div class="text-sm text-white">ส่งแจ้งเตือนอัตโนมัติเมื่อเปิด</div>
+        <label class="switch"><input type="checkbox" id="autoAlertToggle"><span class="slider"></span></label>
+      </div>
+      <div class="flex items-center justify-between gap-3 p-3 bg-dash-bg rounded border border-dash-panelborder">
+        <div class="text-sm text-white">เกณฑ์เตือนล่วงหน้า (วัน)</div>
+        <input type="number" id="leadDays" class="w-16 px-2 py-1 bg-dash-panel border border-dash-panelborder rounded text-center text-sm font-mono text-white focus:outline-none focus:border-dash-accent">
+      </div>
+      <div class="pt-2 flex justify-between items-center">
+        <button id="resetOverridesBtn" class="px-2 py-1 text-xs text-status-danger border border-status-danger/30 hover:bg-status-danger/10 rounded transition-colors">ล้างข้อมูล Local</button>
+        <div id="settingsStatus" class="text-xs text-status-success hidden">บันทึกสำเร็จ</div>
+      </div>
+    </div>
+
+    <div class="p-4 border-t border-dash-panelborder flex justify-end gap-2 bg-[#131B26]">
+      <button class="modal-close-settings px-4 py-1.5 text-sm text-dash-muted hover:text-white transition-colors">ปิด</button>
+      <button id="saveSettings" class="px-4 py-1.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 border border-blue-500 rounded transition-colors">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Mock data exactly as provided
+const STATIC_FALLBACK_DATA = [{"type": "Monorail crane", "location": "Boiler Feed Pumps Unit 1 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "20", "brand": "Donati/Italia : 2019", "serial": "76242", "test_date": "9 ธ.ค. 2568", "expire_date": "9 มิ.ย. 2569", "expire_iso": "2026-06-09", "multi_date": false, "n_records": 1, "all_expire_dates": ["9 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Boiler Feed Pumps Unit 1 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "20", "brand": "Donati/Italia : 2019", "serial": "76243", "test_date": "9 ธ.ค. 2568", "expire_date": "9 มิ.ย. 2569", "expire_iso": "2026-06-09", "multi_date": false, "n_records": 1, "all_expire_dates": ["9 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Boiler Feed Pumps Unit 2 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "20", "brand": "Donati/Italia : 2019", "serial": "76246", "test_date": "10 ธ.ค. 2568", "expire_date": "10 มิ.ย. 2569", "expire_iso": "2026-06-10", "multi_date": false, "n_records": 1, "all_expire_dates": ["10 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Boiler Feed Pumps Unit 2 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "20", "brand": "Donati/Italia : 2019", "serial": "76247", "test_date": "10 ธ.ค. 2568", "expire_date": "10 มิ.ย. 2569", "expire_iso": "2026-06-10", "multi_date": false, "n_records": 1, "all_expire_dates": ["10 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "CCCW Heat Exchanger Generation Building Unit 1 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100053999", "test_date": "5 เม.ย. 2568", "expire_date": "5 เม.ย. 2569", "expire_iso": "2026-04-05", "multi_date": false, "n_records": 1, "all_expire_dates": ["5 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "CCCW Heat Exchanger Generation Building Unit 2 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100053621", "test_date": "3 เม.ย. 2568", "expire_date": "3 เม.ย. 2569", "expire_iso": "2026-04-03", "multi_date": false, "n_records": 1, "all_expire_dates": ["3 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "CCCW Heat Exchanger Generation Building Unit 1 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100053629", "test_date": "3 เม.ย. 2568", "expire_date": "3 เม.ย. 2569", "expire_iso": "2026-04-03", "multi_date": false, "n_records": 1, "all_expire_dates": ["3 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "CCCW Heat Exchanger Generation Building Unit 2 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100034156", "test_date": "3 เม.ย. 2568", "expire_date": "3 เม.ย. 2569", "expire_iso": "2026-04-03", "multi_date": false, "n_records": 1, "all_expire_dates": ["3 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Circulation Water Chlorination Building", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100053620", "test_date": "9 เม.ย. 2568", "expire_date": "9 เม.ย. 2569", "expire_iso": "2026-04-09", "multi_date": false, "n_records": 1, "all_expire_dates": ["9 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Close Cycle Cooling Water Pump Generation Building Unit 1 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "8", "brand": "Demag/Germany : 2019", "serial": "100086929", "test_date": "11 ก.ย. 2568", "expire_date": "12 มี.ค. 2569", "expire_iso": "2026-03-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 มี.ค. 2569"], "note": null}, {"type": "Monorail crane", "location": "Close Cycle Cooling Water Pump Generation Building Unit 1 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "8", "brand": "Demag/Germany : 2019", "serial": "100073290", "test_date": "11 ก.ย. 2568", "expire_date": "12 มี.ค. 2569", "expire_iso": "2026-03-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 มี.ค. 2569"], "note": null}, {"type": "Monorail crane", "location": "Close Cycle Cooling Water Pump Generation Building Unit 2 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "8", "brand": "Demag/Germany : 2019", "serial": "100073289", "test_date": "15 ธ.ค. 2568", "expire_date": "15 มิ.ย. 2569", "expire_iso": "2026-06-15", "multi_date": false, "n_records": 1, "all_expire_dates": ["15 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Close Cycle Cooling Water Pump Generation Building Unit 2 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "8", "brand": "Demag/Germany : 2019", "serial": "100089506", "test_date": "12 ธ.ค. 2568", "expire_date": "12 มิ.ย. 2569", "expire_iso": "2026-06-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Condensate Pump Generation Building Unit 1 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "10", "brand": "Demag/Germany : 2019", "serial": "100090825", "test_date": "11 ก.ย. 2568", "expire_date": "12 มี.ค. 2569", "expire_iso": "2026-03-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 มี.ค. 2569"], "note": null}, {"type": "Monorail crane", "location": "Condensate Pump Generation Building Unit 1 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "8", "brand": "Donati/Italia : 2019", "serial": "77293", "test_date": "11 ก.ย. 2568", "expire_date": "12 มี.ค. 2569", "expire_iso": "2026-03-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 มี.ค. 2569"], "note": null}, {"type": "Monorail crane", "location": "Condensate Pump Generation Building Unit 2 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "10", "brand": "Demag/Germany : 2019", "serial": "100073168", "test_date": "11 ธ.ค. 2568", "expire_date": "11 มิ.ย. 2569", "expire_iso": "2026-06-11", "multi_date": false, "n_records": 1, "all_expire_dates": ["11 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Condensate Pump Generation Building Unit 2 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "10", "brand": "Demag/Germany : 2019", "serial": "100074796", "test_date": "12 ธ.ค. 2568", "expire_date": "12 มิ.ย. 2569", "expire_iso": "2026-06-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 มิ.ย. 2569"], "note": null}, {"type": "Jib crane", "location": "Cooling Tower 11", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "1.6", "brand": "Verlinde/France : 2019", "serial": "100076725", "test_date": "11 ธ.ค. 2568", "expire_date": "11 ธ.ค. 2569", "expire_iso": "2026-12-11", "multi_date": false, "n_records": 1, "all_expire_dates": ["11 ธ.ค. 2569"], "note": null}, {"type": "Jib crane", "location": "Cooling Tower 12", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "1.6", "brand": "Verlinde/France : 2019", "serial": "100076725", "test_date": "6 มี.ค. 2567", "expire_date": "6 มี.ค. 2568", "expire_iso": "2025-03-06", "multi_date": false, "n_records": 1, "all_expire_dates": ["6 มี.ค. 2568"], "note": "แขวน Tag ห้ามใช้งาน"}, {"type": "Monorail crane", "location": "Diesel Driven Fire Pump", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "3", "brand": "Demag/Germany : 2019", "serial": "58973928", "test_date": "9 ก.ย. 2567", "expire_date": "9 ก.ย. 2568", "expire_iso": "2025-09-09", "multi_date": false, "n_records": 1, "all_expire_dates": ["9 ก.ย. 2568"], "note": "รอ หลักฐานการแขวน Tag ห้ามใช้งาน"}, {"type": "Monorail crane", "location": "Electric Motor Driven Fire Pump", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "5", "brand": "Demag/Germany : 2020", "serial": "100870595", "test_date": "12 ธ.ค. 2568", "expire_date": "12 ธ.ค. 2569", "expire_iso": "2026-12-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 ธ.ค. 2569"], "note": null}, {"type": "Overhead crane", "location": "Fuel Gas Compressor Building", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "20/4", "brand": "Stahl/Germany : 2018", "serial": "180084", "test_date": "10 ก.ย. 2568", "expire_date": "11 มี.ค. 2569", "expire_iso": "2026-03-11", "multi_date": false, "n_records": 1, "all_expire_dates": ["11 มี.ค. 2569"], "note": null}, {"type": "Monorail crane", "location": "General Circuit Breaker Unit 1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Donati/Italia : 2021", "serial": "97260", "test_date": "8 เม.ย. 2568", "expire_date": "8 เม.ย. 2569", "expire_iso": "2026-04-08", "multi_date": false, "n_records": 1, "all_expire_dates": ["8 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "General Circuit Breaker Unit 2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Donati/Italia : 2021", "serial": "97258", "test_date": "8 เม.ย. 2568", "expire_date": "8 เม.ย. 2569", "expire_iso": "2026-04-08", "multi_date": false, "n_records": 1, "all_expire_dates": ["8 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "GIS Building", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "/1 / 5/", "brand": "Stahl/Germany : 2018", "serial": "180082", "test_date": "11 ธ.ค. 2568", "expire_date": "11 มิ.ย. 2569", "expire_iso": "2026-06-11", "multi_date": true, "n_records": 2, "all_expire_dates": ["11 มิ.ย. 2569", "11 มิ.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "HP/IP/LP Bypass Valve Generation Building Unit 1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "5", "brand": "Donati/Italia : 2019", "serial": "77283", "test_date": "11 ก.ย. 2568", "expire_date": "12 มี.ค. 2569", "expire_iso": "2026-03-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 มี.ค. 2569"], "note": null}, {"type": "Monorail crane", "location": "HP/IP/LP Bypass Valve Generation Building Unit 2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "5", "brand": "Donati/Italia : 2019", "serial": "76239", "test_date": "11 ธ.ค. 2568", "expire_date": "11 มิ.ย. 2569", "expire_iso": "2026-06-11", "multi_date": false, "n_records": 1, "all_expire_dates": ["11 มิ.ย. 2569"], "note": null}, {"type": "Jib crane", "location": "JIB HRSG Unit 1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "1", "brand": "Harrington/Japan: 2017", "serial": "27441", "test_date": "5 เม.ย. 2568", "expire_date": "5 เม.ย. 2569", "expire_iso": "2026-04-05", "multi_date": false, "n_records": 1, "all_expire_dates": ["5 เม.ย. 2569"], "note": null}, {"type": "Jib crane", "location": "JIB HRSG Unit 2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "1", "brand": "Harrington/Japan: 2017", "serial": "27444", "test_date": "5 เม.ย. 2568", "expire_date": "5 เม.ย. 2569", "expire_iso": "2026-04-05", "multi_date": false, "n_records": 1, "all_expire_dates": ["5 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Liquid Fuel & Water Injection", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "5", "brand": "Demag/Germany : 2019", "serial": "100223522", "test_date": "12 ธ.ค. 2568", "expire_date": "12 ธ.ค. 2569", "expire_iso": "2026-12-12", "multi_date": false, "n_records": 1, "all_expire_dates": ["12 ธ.ค. 2569"], "note": null}, {"type": "Overhead crane", "location": "Turbine Hall Bridge Crane GT11", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "-/30/5 / 130/ - / -", "brand": "Demag/Germany : 2018", "serial": "180081-1", "test_date": "4 ก.ย. 2568", "expire_date": "4 ธ.ค. 2568", "expire_iso": "2025-12-04", "multi_date": true, "n_records": 2, "all_expire_dates": ["4 ธ.ค. 2568", "5 มี.ค. 2569"], "note": "ทดสอบแล้วเมื่อ ธ.ค. 68 ผลเบื้องต้นพร้อมใช้งาน (รอ รายงานฉบับจริง)"}, {"type": "Overhead crane", "location": "Turbine Hall Bridge Crane GT12", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "- /30/ 5 / 130/ - / -", "brand": "Stahl/Germany : 2018", "serial": "180083-1", "test_date": "9 ม.ค. 2569", "expire_date": "10 เม.ย. 2569", "expire_iso": "2026-04-10", "multi_date": true, "n_records": 2, "all_expire_dates": ["10 เม.ย. 2569", "10 เม.ย. 2569"], "note": null}, {"type": "Overhead crane", "location": "Turbine Hall Bridge Crane ST11", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "- /30/5 / 130/ - / -", "brand": "Stahl/Germany : 2018", "serial": "180081-2", "test_date": "4 ก.ย. 2568", "expire_date": "4 ธ.ค. 2568", "expire_iso": "2025-12-04", "multi_date": true, "n_records": 2, "all_expire_dates": ["4 ธ.ค. 2568", "4 ธ.ค. 2568"], "note": "ทดสอบแล้วเมื่อ ธ.ค. 68"}, {"type": "Overhead crane", "location": "Turbine Hall Bridge Crane ST12", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "- /30/5 / 130/ - / -", "brand": "Stahl/Germany : 2018", "serial": "180083-2", "test_date": "9 ม.ค. 2569", "expire_date": "10 เม.ย. 2569", "expire_iso": "2026-04-10", "multi_date": true, "n_records": 2, "all_expire_dates": ["10 เม.ย. 2569", "10 ก.ค. 2569"], "note": null}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 1 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100022027", "test_date": "5 เม.ย. 2568", "expire_date": "5 เม.ย. 2569", "expire_iso": "2026-04-05", "multi_date": false, "n_records": 1, "all_expire_dates": ["5 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 1 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100027527", "test_date": "2 เม.ย. 2568", "expire_date": "2 เม.ย. 2569", "expire_iso": "2026-04-02", "multi_date": false, "n_records": 1, "all_expire_dates": ["2 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 1 No.3", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100064053", "test_date": "9 ก.ย. 2567", "expire_date": "9 ก.ย. 2568", "expire_iso": "2025-09-09", "multi_date": false, "n_records": 1, "all_expire_dates": ["9 ก.ย. 2568"], "note": "รอ หลักฐานการแขวน Tag ห้ามใช้งาน"}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 1 No.4", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100022025", "test_date": "5 เม.ย. 2568", "expire_date": "5 เม.ย. 2569", "expire_iso": "2026-04-05", "multi_date": false, "n_records": 1, "all_expire_dates": ["5 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 2 No.1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100027527", "test_date": "2 เม.ย. 2568", "expire_date": "2 เม.ย. 2569", "expire_iso": "2026-04-02", "multi_date": false, "n_records": 1, "all_expire_dates": ["2 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 2 No.2", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100027527", "test_date": "9 ก.ย. 2567", "expire_date": "9 ก.ย. 2568", "expire_iso": "2025-09-09", "multi_date": false, "n_records": 1, "all_expire_dates": ["9 ก.ย. 2568"], "note": "รอ หลักฐานการแขวน Tag ห้ามใช้งาน"}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 2 No.3", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100023395", "test_date": "2 เม.ย. 2568", "expire_date": "2 เม.ย. 2569", "expire_iso": "2026-04-02", "multi_date": false, "n_records": 1, "all_expire_dates": ["2 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Vacuum Pump Motor Generation Building Unit 2 No.4", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "2", "brand": "Demag/Germany : 2019", "serial": "100025839", "test_date": "2 เม.ย. 2568", "expire_date": "2 เม.ย. 2569", "expire_iso": "2026-04-02", "multi_date": false, "n_records": 1, "all_expire_dates": ["2 เม.ย. 2569"], "note": null}, {"type": "Monorail crane", "location": "Water Treatment Building Decanter Centrifuge", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "5", "brand": "Demag/Germany : 2019", "serial": "100222822", "test_date": "11 ธ.ค. 2568", "expire_date": "11 มิ.ย. 2569", "expire_iso": "2026-06-11", "multi_date": false, "n_records": 1, "all_expire_dates": ["11 มิ.ย. 2569"], "note": null}, {"type": "Overhead crane", "location": "Cooling Tower Make up Pump House", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "- /3 / 15/ -", "brand": "Stahl/Germany : 2018", "serial": "18008/A1", "test_date": "10 ก.ย. 2568", "expire_date": "11 มี.ค. 2569", "expire_iso": "2026-03-11", "multi_date": true, "n_records": 2, "all_expire_dates": ["11 มี.ค. 2569", "10 ก.ย. 2569"], "note": null}, {"type": "Electric chain hoist", "location": "JIB Filter house Unit 1", "div": "กบรก2-ฟ.", "dept": "อฟก.", "rating": "0.25", "brand": "Verlinde/France : 2019", "serial": "1801100186", "test_date": "16 พ.ค. 2567", "expire_date": "16 ", "expire_iso": null, "multi_date": false, "n_records": 1, "all_expire_dates": [], "note": null}].map(item => Object.assign({}, item, { _id: (item.serial || 'noserial') + '|' + item.location }));
+
+let MASTER_DATA = STATIC_FALLBACK_DATA;
+
+function withId(item){ return Object.assign({}, item, { _id: (item.serial || 'noserial') + '|' + item.location }); }
+
+let overrides = {};
+try{ const saved = localStorage.getItem('crane_overrides'); if(saved) overrides = JSON.parse(saved); }catch(e){}
+function saveOverrides(){ try{ localStorage.setItem('crane_overrides', JSON.stringify(overrides)); }catch(e){} }
+function applyOverride(item){
+  const ov = overrides[item._id];
+  if(!ov) return item;
+  return Object.assign({}, item, { test_date: ov.test_date_th, expire_date: ov.expire_date_th, expire_iso: ov.expire_iso, _overridden: true, _overrideNote: ov.note, _inspectorName: ov.inspector_name || null, _photoUrl: ov.photo_url || null });
+}
+
+let plans = [];
+try{ const saved = localStorage.getItem('crane_plans'); if(saved) plans = JSON.parse(saved); }catch(e){}
+function savePlansLocal(){ try{ localStorage.setItem('crane_plans', JSON.stringify(plans)); }catch(e){} }
+
+async function syncPlansFromBackend(){
+  if(!settings.webhookUrl) return;
+  const result = await callBackend({action:'get_plans'});
+  if(result.ok && result.data && Array.isArray(result.data.plans)){
+    plans = result.data.plans;
+    savePlansLocal();
+    renderPlans();
+  }
+}
+
+// System Date Fixed for Demo
+const TODAY = new Date('2026-06-25T00:00:00');
+const monthsTH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+function fmtThaiToday(d){ return `${d.getDate()}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()+543}`; }
+
+let settings = {webhookUrl:'', lineTarget:'', autoAlert:false, leadDays:30};
+try{ const saved = localStorage.getItem('crane_settings'); if(saved) settings = Object.assign(settings, JSON.parse(saved)); }catch(e){}
+
+async function callBackend(payload){
+  if(!settings.webhookUrl) return {ok:false, reason:'no_webhook'};
+  try{
+    const res = await fetch(settings.webhookUrl, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => null);
+    return {ok: res.ok && data && data.ok !== false, status: res.status, data};
+  }catch(err){ return {ok:false, reason: err.message}; }
+}
+
+async function syncOverridesFromBackend(){
+  if(!settings.webhookUrl) return;
+  const result = await callBackend({action:'get_overrides'});
+  if(result.ok && result.data && result.data.overrides){
+    overrides = Object.assign({}, overrides, result.data.overrides);
+    saveOverrides();
+    enriched = buildEnriched();
+    render();
+  }
+}
+
+function buildAlertPayload(){
+  const alerts = enriched.filter(i => i.tier === 'expired' || i.tier === 'due' || i.tier === 'pending_tag');
+  const lines = alerts.map(a => {
+    const tagMap = {expired:'🔴 หมดอายุแล้ว', due:'🟠 ใกล้ครบกำหนด', pending_tag:'🟣 เกินกำหนด+รอแขวน Tag'};
+    const tag = tagMap[a.tier] || '🔴 หมดอายุแล้ว';
+    return `${tag} | ${a.type} @ ${a.location} | ครบกำหนด ${a.expire_date}${a.days!==null ? ` (${a.days<0?'เลยมา '+Math.abs(a.days):'เหลือ '+a.days} วัน)`:''}`;
+  });
+  const message = `แจ้งเตือนสถานะเครน กฟผ. (${fmtThaiToday(TODAY)})\nพบ ${alerts.length} รายการที่ต้องดำเนินการ\n\n` + lines.join('\n');
+  return {action:'send_line_alert', message, alerts, target: settings.lineTarget || null, generated_at: new Date().toISOString()};
+}
+
+async function sendToWebhook(){
+  if(!settings.webhookUrl){
+    alert('กรุณาตั้งค่า Webhook URL ก่อนใช้งาน (ไปที่ปุ่ม "Settings")');
+    openModal('settingsOverlay');
+    return {ok:false, reason:'no_webhook'};
+  }
+  const payload = buildAlertPayload();
+  return await callBackend(payload);
+}
+
+function detectTagState(note){
+  if(!note) return null;
+  if(note.includes('รอ') && note.includes('แขวน Tag')) return 'pending_tag';
+  if(note.includes('แขวน Tag')) return 'tagged';
+  return null;
+}
+
+function computeStatus(item){
+  const dateOnly = (() => {
+    if(!item.expire_iso) return {tier:'unknown', days:null};
+    const exp = new Date(item.expire_iso + 'T00:00:00');
+    const days = Math.round((exp - TODAY) / 86400000);
+    if(days < 0) return {tier:'expired', days};
+    if(days <= settings.leadDays) return {tier:'due', days};
+    return {tier:'ok', days};
+  })();
+  const tagState = detectTagState(item.note);
+  if(tagState === 'tagged') return {tier:'tagged', days:dateOnly.days, dateTier:dateOnly.tier};
+  if(tagState === 'pending_tag' && (dateOnly.tier === 'expired' || dateOnly.tier === 'due')) return {tier:'pending_tag', days:dateOnly.days, dateTier:dateOnly.tier};
+  return Object.assign({dateTier:dateOnly.tier}, dateOnly);
+}
+
+function buildEnriched(){ return MASTER_DATA.map(item => { const o = applyOverride(item); return Object.assign({}, o, computeStatus(o)); }); }
+let enriched = buildEnriched();
+
+/* --- Charts setup --- */
+Chart.defaults.color = '#94a3b8';
+Chart.defaults.font.family = "'Sarabun', sans-serif";
+let statusChart = null;
+let timelineChart = null;
+
+function initChart() {
+  const ctx = document.getElementById('statusChart').getContext('2d');
+  statusChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Normal', `High (≤${settings.leadDays}d)`, 'Critical', 'Pending Tag', 'Tagged', 'Unknown'],
+      datasets: [{
+        data: [0, 0, 0, 0, 0, 0],
+        backgroundColor: ['#10B981', '#F97316', '#EF4444', '#D946EF', '#94A3B8', '#475569'],
+        borderWidth: 2, borderColor: '#101722', hoverOffset: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '70%',
+      plugins: {
+        legend: { position: 'right', labels: { usePointStyle: true, padding: 12, boxWidth: 8, font:{size:11} } },
+        tooltip: { displayColors: true, backgroundColor:'rgba(15,23,42,0.9)' }
+      }
+    }
+  });
+}
+
+function initTimelineChart(){
+  const ctx = document.getElementById('timelineChart').getContext('2d');
+  
+  // Create gradient
+  let gradient = ctx.createLinearGradient(0, 0, 0, 300);
+  gradient.addColorStop(0, 'rgba(56, 189, 248, 0.4)');
+  gradient.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+
+  timelineChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label:'Alarm Count', data: [], backgroundColor: gradient, borderColor: '#38BDF8', borderWidth: 2, tension: 0.4, fill: true, pointBackgroundColor: '#080E14', pointBorderColor: '#38BDF8', pointRadius: 3 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display:false }, tooltip: { backgroundColor:'rgba(15,23,42,0.9)' } },
+      scales: { 
+        y: { beginAtZero:true, ticks:{ precision:0, stepSize:1 }, grid:{ color: '#1E293B' } }, 
+        x: { grid:{ display: false }, ticks: { font:{size:10} } } 
+      }
+    }
+  });
+}
+
+function updateChartsData(counts) {
+  if (statusChart) {
+    statusChart.data.datasets[0].data = [counts.ok, counts.due, counts.expired, counts.pending_tag, counts.tagged, counts.unknown];
+    statusChart.update();
+  }
+  if (timelineChart) {
+    const buckets = [];
+    const cursor = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
+    for(let i=0;i<12;i++){
+      const d = new Date(cursor.getFullYear(), cursor.getMonth()+i, 1);
+      buckets.push({ label:`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`, year:d.getFullYear(), month:d.getMonth(), count:0 });
+    }
+    enriched.forEach(item => {
+      if(!item.expire_iso) return;
+      const exp = new Date(item.expire_iso + 'T00:00:00');
+      const b = buckets.find(x => x.year===exp.getFullYear() && x.month===exp.getMonth());
+      if(b) b.count++;
+    });
+    timelineChart.data.labels = buckets.map(b => b.label);
+    timelineChart.data.datasets[0].data = buckets.map(b => b.count);
+    timelineChart.update();
+  }
+}
+
+/* --- Render UI --- */
+const badgeLabel = {pending_tag:'Pending Tag', expired:'Critical', due:'High', ok:'Normal', unknown:'Unknown', tagged:'Tagged'};
+const badgeColor = {
+  pending_tag: 'text-[#D946EF] border-[#D946EF]',
+  expired: 'text-[#EF4444] border-[#EF4444]',
+  due: 'text-[#F97316] border-[#F97316]',
+  ok: 'text-[#10B981] border-[#10B981]',
+  unknown: 'text-[#64748B] border-[#64748B]',
+  tagged: 'text-[#94A3B8] border-[#94A3B8]'
+};
+const iconSVG = {
+  pending_tag: '<path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />',
+  expired: '<path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />',
+  due: '<path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />',
+  ok: '<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />',
+  all: '<path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />',
+  tagged: '<path d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />'
+};
+
+function renderSummary(activeTier){
+  const counts = {expired:0, due:0, ok:0, unknown:0, tagged:0, pending_tag:0};
+  enriched.forEach(i => counts[i.tier]++);
+  updateChartsData(counts);
+
+  const stats = [
+    {tier:'all', label:'Overall', num:enriched.length, pct:'100%', icon:'all', color:'text-dash-accent'},
+    {tier:'pending_tag', label:'Pending Tag', num:counts.pending_tag, pct:Math.round(counts.pending_tag/enriched.length*100)+'%', icon:'pending_tag', color:'text-status-pending'},
+    {tier:'expired', label:'Critical', num:counts.expired, pct:Math.round(counts.expired/enriched.length*100)+'%', icon:'expired', color:'text-status-danger'},
+    {tier:'due', label:'High', num:counts.due, pct:Math.round(counts.due/enriched.length*100)+'%', icon:'due', color:'text-status-warning'},
+    {tier:'ok', label:'Normal', num:counts.ok, pct:Math.round(counts.ok/enriched.length*100)+'%', icon:'ok', color:'text-status-success'},
+  ];
+
+  document.getElementById('summaryStrip').innerHTML = stats.map(c => {
+    const isActive = activeTier === c.tier;
+    return `
+      <div class="cursor-pointer min-w-[140px] flex-1 bg-dash-panel border-t-2 ${isActive ? `border-[${c.color.replace('text-','')}] bg-[#141E2D]` : 'border-dash-panelborder'} rounded border border-dash-panelborder p-3 transition-colors hover:bg-dash-rowhover" data-tier="${c.tier}">
+        <div class="flex justify-between items-start mb-1">
+          <span class="text-xs text-dash-muted font-semibold uppercase tracking-wider">${c.label}</span>
+          <svg class="w-4 h-4 ${c.color}" fill="none" stroke="currentColor" stroke-width="2">${iconSVG[c.icon]}</svg>
+        </div>
+        <div class="flex items-end justify-between">
+          <span class="text-2xl font-display font-bold text-white leading-none">${c.num}</span>
+          <span class="text-[10px] text-dash-muted">${c.pct}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.querySelectorAll('#summaryStrip > div').forEach(el => {
+    el.addEventListener('click', () => {
+      const f = el.getAttribute('data-tier');
+      state.tierFilter = (state.tierFilter === f) ? null : f;
+      render();
+    });
+  });
+}
+
+const tierRank = {pending_tag:0, expired:1, due:2, unknown:3, tagged:4, ok:5};
+const state = {tierFilter:null, search:'', sort:'urgency', expanded:new Set()};
+
+function baseLocation(loc){ return loc.replace(/\s*No\.\s*\d+\s*$/i, '').trim(); }
+function groupKey(i){ return i.type + '||' + baseLocation(i.location); }
+
+function buildGroups(items){
+  const map = new Map();
+  items.forEach(i => {
+    const key = groupKey(i);
+    if(!map.has(key)) map.set(key, []);
+    map.get(key).push(i);
+  });
+  return [...map.entries()].map(([key, members]) => {
+    const worst = [...members].sort((a,b) => tierRank[a.tier]-tierRank[b.tier])[0];
+    const minDays = members.reduce((m,x) => x.days===null ? m : (m===null ? x.days : Math.min(m,x.days)), null);
+    const minIso = members.reduce((m,x) => !x.expire_iso ? m : (!m || x.expire_iso < m ? x.expire_iso : m), null);
+    return {
+      key, members, isCluster: members.length > 1,
+      type: members[0].type, baseLoc: baseLocation(members[0].location),
+      worstTier: worst.tier, sortDays: minDays, sortIsoAsc: minIso
+    };
+  });
+}
+
+function sortGroups(groups, mode){
+  const arr = [...groups];
+  if(mode === 'urgency') arr.sort((a,b) => tierRank[a.worstTier]!==tierRank[b.worstTier] ? tierRank[a.worstTier]-tierRank[b.worstTier] : (a.sortDays===null?Infinity:a.sortDays)-(b.sortDays===null?Infinity:b.sortDays));
+  else if(mode === 'date_asc') arr.sort((a,b) => (a.sortIsoAsc||'9999').localeCompare(b.sortIsoAsc||'9999'));
+  else if(mode === 'type') arr.sort((a,b) => a.type.localeCompare(b.type) || a.baseLoc.localeCompare(b.baseLoc));
+  return arr;
+}
+
+function formatRowDate(str) {
+  if(!str) return '-';
+  const m = str.match(/(\d+)\s+([ก-ฮ.]+)\s+(\d+)/);
+  if(!m) return str;
+  const monthMap = {'ม.ค.':'01','ก.พ.':'02','มี.ค.':'03','เม.ย.':'04','พ.ค.':'05','มิ.ย.':'06','ก.ค.':'07','ส.ค.':'08','ก.ย.':'09','ต.ค.':'10','พ.ย.':'11','ธ.ค.':'12'};
+  return `${m[1].padStart(2,'0')}-${monthMap[m[2]]}-${parseInt(m[3])-543}`;
+}
+
+function rowHtml(i, isChild = false){
+  const bColor = badgeColor[i.tier];
+  
+  return `
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 px-4 py-3 border-b border-dash-panelborder items-center hover:bg-dash-rowhover transition-colors ${isChild ? 'bg-dash-bg pl-8' : 'bg-dash-row'}" data-id="${encodeURIComponent(i._id)}">
+      <div class="md:col-span-3 min-w-0">
+        <div class="text-sm font-semibold text-white truncate">${i.location}</div>
+        <div class="text-xs text-dash-muted flex gap-2">
+          <span>${i.type}</span>
+          ${i.multi_date ? `<span class="text-status-warning" title="มีหลายวันหมดอายุ (ยึดตามเร็วสุด)">[M]</span>` : ''}
+        </div>
+      </div>
+      <div class="md:col-span-3 text-xs text-dash-muted min-w-0">
+        <div class="truncate"><span class="text-white font-mono">${i.serial || '-'}</span></div>
+        <div class="truncate" title="${i.brand}">${i.brand || '-'}</div>
+      </div>
+      <div class="md:col-span-2 text-xs md:text-sm font-mono text-white">
+        ${formatRowDate(i.expire_date)}
+      </div>
+      <div class="md:col-span-2 md:text-center mt-1 md:mt-0">
+        <span class="inline-block px-2 py-0.5 text-[10px] uppercase font-bold tracking-widest rounded badge-outline ${bColor}">${badgeLabel[i.tier]}</span>
+        ${i._overridden ? `<span class="inline-block ml-1 w-2 h-2 rounded-full bg-status-success" title="ผู้ใช้บันทึกการตรวจสอบแล้ว"></span>` : ''}
+      </div>
+      <div class="md:col-span-2 flex md:justify-center items-center gap-3 mt-2 md:mt-0">
+        <button class="btn-inspect text-dash-accent hover:text-white" data-id="${encodeURIComponent(i._id)}" title="บันทึกว่าตรวจแล้ว">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function groupHtml(g){
+  const isExpanded = state.expanded.has(g.key) || state.search.trim() !== '';
+  return `
+    <div class="crane-group ${isExpanded?'group-expanded':''}" data-key="${encodeURIComponent(g.key)}">
+      <div class="group-header cursor-pointer grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 px-4 py-3 border-b border-dash-panelborder items-center bg-dash-row hover:bg-dash-rowhover transition-colors">
+        <div class="md:col-span-3 flex items-center gap-2 min-w-0">
+          <svg class="chevron w-4 h-4 text-dash-muted flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-white truncate">${g.baseLoc} <span class="ml-1 text-[10px] bg-slate-800 text-dash-accent px-1.5 py-0.5 rounded border border-slate-700">${g.members.length} items</span></div>
+            <div class="text-xs text-dash-muted">${g.type}</div>
+          </div>
+        </div>
+        <div class="md:col-span-3 text-xs text-dash-muted italic hidden md:block">(Multiple components inside)</div>
+        <div class="md:col-span-2 text-xs md:text-sm font-mono text-white hidden md:block">Var</div>
+        <div class="md:col-span-2 md:text-center mt-1 md:mt-0">
+          <span class="inline-block px-2 py-0.5 text-[10px] uppercase font-bold tracking-widest rounded badge-outline ${badgeColor[g.worstTier]}">${badgeLabel[g.worstTier]}</span>
+        </div>
+        <div class="md:col-span-2 text-xs text-dash-muted md:text-center hidden md:block">Click to Expand</div>
+      </div>
+      <div class="group-children">
+        <div class="flex flex-col">
+          ${g.members.map(m => rowHtml(m, true)).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function render(){
+  renderSummary(state.tierFilter);
+  let items = enriched;
+  if(state.tierFilter) items = items.filter(i => i.tier === state.tierFilter);
+  if(state.search){
+    const q = state.search.toLowerCase();
+    items = items.filter(i => i.type.toLowerCase().includes(q) || i.location.toLowerCase().includes(q) || (i.brand||'').toLowerCase().includes(q) || (i.serial||'').toLowerCase().includes(q));
+  }
+
+  const list = document.getElementById('craneList');
+  const emptyState = document.getElementById('emptyState');
+
+  if(items.length === 0){
+    list.innerHTML = ''; emptyState.classList.remove('hidden'); return;
+  }
+  emptyState.classList.add('hidden');
+
+  let groups = buildGroups(items);
+  groups = sortGroups(groups, state.sort);
+
+  list.innerHTML = groups.map(g => g.isCluster ? groupHtml(g) : rowHtml(g.members[0])).join('');
+
+  list.querySelectorAll('.group-header').forEach(el => {
+    el.addEventListener('click', () => {
+      const groupEl = el.closest('.crane-group');
+      const key = decodeURIComponent(groupEl.getAttribute('data-key'));
+      if(state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      render();
+    });
+  });
+
+  list.querySelectorAll('.btn-inspect').forEach(el => { el.addEventListener('click', (ev) => { ev.stopPropagation(); openInspectModal(decodeURIComponent(el.getAttribute('data-id'))); }); });
+}
+
+/* Modals logic */
+function openModal(id) { document.getElementById(id).classList.add('show'); document.body.style.overflow = 'hidden'; }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); document.body.style.overflow = ''; }
+
+/* ===== Site visit plans (advance planning) ===== */
+function planDaysLeft(p){
+  if(!p.planned_date) return null;
+  const d = new Date(p.planned_date + 'T00:00:00');
+  return Math.round((d - TODAY) / 86400000);
+}
+
+function planStatusInfo(p){
+  if(p.status === 'done') return { label:'ตรวจแล้ว', cls:'text-status-success border-status-success' };
+  const days = planDaysLeft(p);
+  if(days === null) return { label:'ไม่ระบุวันที่', cls:'text-dash-muted border-dash-panelborder' };
+  if(days < 0) return { label:`เลยกำหนด ${Math.abs(days)} วัน`, cls:'text-status-danger border-status-danger' };
+  if(days === 0) return { label:'วันนี้', cls:'text-status-warning border-status-warning' };
+  return { label:`อีก ${days} วัน`, cls:'text-dash-accent border-dash-accent' };
+}
+
+function renderPlans(){
+  const listEl = document.getElementById('planList');
+  const emptyEl = document.getElementById('planEmptyState');
+  if(plans.length === 0){
+    listEl.innerHTML = ''; emptyEl.classList.remove('hidden'); return;
+  }
+  emptyEl.classList.add('hidden');
+  const sorted = [...plans].sort((a,b) => (a.planned_date||'9999').localeCompare(b.planned_date||'9999'));
+  listEl.innerHTML = sorted.map(p => {
+    const info = planStatusInfo(p);
+    return `
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 px-4 py-3 border-b border-dash-panelborder items-center hover:bg-dash-rowhover transition-colors bg-dash-row ${p.status==='done' ? 'opacity-60' : ''}">
+        <div class="md:col-span-3 font-mono text-sm text-white">${p.planned_date || '-'}</div>
+        <div class="md:col-span-3 min-w-0">
+          <div class="text-sm font-semibold text-white truncate">${p.site || '-'}</div>
+          ${p.note ? `<div class="text-xs text-dash-muted truncate">${p.note}</div>` : ''}
+        </div>
+        <div class="md:col-span-2 text-xs text-dash-muted">${p.inspector || '-'}</div>
+        <div class="md:col-span-2">
+          <span class="inline-block px-2 py-0.5 text-[10px] uppercase font-bold tracking-widest rounded badge-outline ${info.cls}">${info.label}</span>
+        </div>
+        <div class="md:col-span-2 flex items-center gap-3">
+          ${p.status !== 'done' ? `<button class="plan-done text-status-success hover:text-white text-xs" data-id="${encodeURIComponent(p.id)}" title="ทำเครื่องหมายว่าตรวจแล้ว">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </button>` : ''}
+          <button class="plan-delete text-status-danger hover:text-white text-xs" data-id="${encodeURIComponent(p.id)}" title="ลบแผน">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.plan-done').forEach(el => el.addEventListener('click', () => markPlanDone(decodeURIComponent(el.getAttribute('data-id')))));
+  listEl.querySelectorAll('.plan-delete').forEach(el => el.addEventListener('click', () => deletePlanEntry(decodeURIComponent(el.getAttribute('data-id')))));
+}
+
+function markPlanDone(id){
+  const p = plans.find(x => x.id === id); if(!p) return;
+  p.status = 'done'; savePlansLocal(); renderPlans();
+  if(settings.webhookUrl) callBackend({action:'save_plan', id, plan:p});
+}
+
+function deletePlanEntry(id){
+  if(!confirm('ยืนยันลบแผนเข้าตรวจนี้?')) return;
+  plans = plans.filter(x => x.id !== id); savePlansLocal(); renderPlans();
+  if(settings.webhookUrl) callBackend({action:'delete_plan', id});
+}
+
+document.getElementById('addPlanBtn').addEventListener('click', () => {
+  const site = document.getElementById('planSite').value.trim();
+  const date = document.getElementById('planDate').value;
+  const inspector = document.getElementById('planInspector').value.trim();
+  const note = document.getElementById('planNote').value.trim();
+  if(!site || !date){ alert('กรุณาระบุไซต์/สถานที่ และวันที่นัดเข้าตรวจ'); return; }
+  const plan = { id: 'plan_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), site, planned_date: date, inspector: inspector || null, note: note || null, status: 'planned', created_at: new Date().toISOString() };
+  plans.push(plan); savePlansLocal(); renderPlans();
+  document.getElementById('planSite').value = ''; document.getElementById('planDate').value = ''; document.getElementById('planNote').value = '';
+  if(settings.webhookUrl) callBackend({action:'save_plan', id: plan.id, plan});
+});
+
+function populatePlanSiteOptions(){
+  const el = document.getElementById('planSiteOptions');
+  const locs = [...new Set(MASTER_DATA.map(i => i.location))].sort();
+  el.innerHTML = locs.map(l => `<option value="${l}"></option>`).join('');
+}
+
+/* ===== Inspected log (post-alert, date + inspector) ===== */
+const historyState = { search: '' };
+
+function buildInspectedLog(){
+  return Object.keys(overrides).map(id => {
+    const ov = overrides[id];
+    const item = MASTER_DATA.find(x => x._id === id) || {};
+    return Object.assign({ id, type: item.type || '-', location: item.location || id }, ov);
+  }).sort((a,b) => (b.recorded_at || '').localeCompare(a.recorded_at || ''));
+}
+
+function formatRecordedAt(iso){
+  if(!iso) return '-';
+  const d = new Date(iso);
+  if(isNaN(d)) return iso;
+  return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function renderHistoryLog(){
+  const listEl = document.getElementById('historyLogList');
+  const emptyEl = document.getElementById('historyEmptyState');
+  let log = buildInspectedLog();
+  if(historyState.search){
+    const q = historyState.search.toLowerCase();
+    log = log.filter(r => r.location.toLowerCase().includes(q) || r.type.toLowerCase().includes(q) || (r.inspector_name||'').toLowerCase().includes(q));
+  }
+  if(log.length === 0){ listEl.innerHTML = ''; emptyEl.classList.remove('hidden'); return; }
+  emptyEl.classList.add('hidden');
+  listEl.innerHTML = log.map(r => `
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 px-4 py-3 border-b border-dash-panelborder items-center hover:bg-dash-rowhover transition-colors bg-dash-row">
+      <div class="md:col-span-3 font-mono text-xs text-white">${formatRecordedAt(r.recorded_at)}</div>
+      <div class="md:col-span-3 min-w-0">
+        <div class="text-sm font-semibold text-white truncate">${r.location}</div>
+        <div class="text-xs text-dash-muted truncate">${r.type}</div>
+      </div>
+      <div class="md:col-span-2 text-xs text-white">${r.inspector_name || '-'}</div>
+      <div class="md:col-span-2 text-xs text-dash-muted font-mono">ครบกำหนดใหม่: ${r.expire_date_th || '-'}</div>
+      <div class="md:col-span-2 flex items-center gap-2 min-w-0">
+        ${r.photo_url ? `<img src="${r.photo_url}" class="w-9 h-9 rounded object-cover border border-slate-700 cursor-pointer flex-shrink-0" onclick="window.open('${r.photo_url}','_blank')">` : ''}
+        ${r.note ? `<span class="text-xs italic text-slate-400 truncate" title="${r.note}">"${r.note}"</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+document.querySelectorAll('.view-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.view-tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const view = btn.getAttribute('data-view');
+    document.getElementById('listView').classList.toggle('hidden', view !== 'list');
+    document.getElementById('planView').classList.toggle('hidden', view !== 'plan');
+    document.getElementById('historyView').classList.toggle('hidden', view !== 'history');
+    if(view === 'plan') renderPlans();
+    if(view === 'history') renderHistoryLog();
+  });
+});
+
+document.getElementById('historySearchInput').addEventListener('input', e => { historyState.search = e.target.value; renderHistoryLog(); });
+
+document.getElementById('searchInput').addEventListener('input', e => { state.search = e.target.value; render(); });
+document.getElementById('sortSelect').addEventListener('change', e => { state.sort = e.target.value; render(); });
+
+setInterval(() => {
+  document.getElementById('clockBox').textContent = new Date().toLocaleString('en-US', {hour:'2-digit', minute:'2-digit', second:'2-digit', day:'2-digit', month:'2-digit', year:'numeric'});
+  document.getElementById('todayLabel').textContent = fmtThaiToday(TODAY);
+}, 1000);
+
+initChart();
+initTimelineChart();
+render();
+populatePlanSiteOptions();
+renderPlans();
+setTimeout(() => { syncOverridesFromBackend(); syncPlansFromBackend(); }, 0);
+if(settings.autoAlert && settings.webhookUrl){ sendToWebhook(); }
+
+// Setup Inspect
+let inspectTargetId = null;
+let pendingPhotoBase64 = null;
+let pendingPhotoMime = null;
+
+function resizeImageToBase64(file, maxDim, quality){
+  maxDim = maxDim || 1280; quality = quality || 0.72;
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if(w > h && w > maxDim){ h = Math.round(h * maxDim / w); w = maxDim; }
+        else if(h >= w && h > maxDim){ w = Math.round(w * maxDim / h); h = maxDim; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve({ base64: dataUrl.split(',')[1], mime: 'image/jpeg', dataUrl });
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+document.getElementById('inspectPhoto').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const hint = document.getElementById('inspectPhotoHint');
+  const preview = document.getElementById('inspectPhotoPreview');
+  if(!file){ pendingPhotoBase64 = null; pendingPhotoMime = null; preview.classList.add('hidden'); hint.textContent = ''; return; }
+  hint.textContent = 'กำลังย่อรูป...';
+  try{
+    const result = await resizeImageToBase64(file);
+    pendingPhotoBase64 = result.base64; pendingPhotoMime = result.mime;
+    preview.src = result.dataUrl; preview.classList.remove('hidden');
+    hint.textContent = 'พร้อมแนบรูปนี้เมื่อบันทึก';
+  }catch(err){
+    pendingPhotoBase64 = null; pendingPhotoMime = null;
+    hint.textContent = 'ย่อรูปไม่สำเร็จ ลองเลือกรูปใหม่';
+  }
+});
+
+function openInspectModal(id){
+  inspectTargetId = id; const item = enriched.find(x => x._id === id); if(!item) return;
+  document.getElementById('inspectSub').textContent = `${item.type} | ${item.location}`;
+  document.getElementById('inspectDate').value = TODAY.toISOString().slice(0,10);
+  document.getElementById('inspectMonths').value = 12; document.getElementById('inspectNote').value = '';
+  document.getElementById('inspectInspector').value = localStorage.getItem('crane_last_inspector') || '';
+  document.getElementById('inspectPhoto').value = ''; document.getElementById('inspectPhotoPreview').classList.add('hidden');
+  document.getElementById('inspectPhotoHint').textContent = '';
+  pendingPhotoBase64 = null; pendingPhotoMime = null;
+  openModal('inspectOverlay');
+}
+document.querySelectorAll('.modal-close-inspect').forEach(btn => btn.addEventListener('click', () => closeModal('inspectOverlay')));
+
+document.getElementById('confirmInspect').addEventListener('click', async () => {
+  if(!inspectTargetId) return;
+  const dateVal = document.getElementById('inspectDate').value; const monthsVal = parseInt(document.getElementById('inspectMonths').value) || 12;
+  const noteVal = document.getElementById('inspectNote').value.trim(); const inspectorVal = document.getElementById('inspectInspector').value.trim();
+  if(!dateVal) return;
+  const testDate = new Date(dateVal + 'T00:00:00'); const expireDate = new Date(testDate); expireDate.setMonth(expireDate.getMonth() + monthsVal);
+  const overrideRecord = { test_date_th: testDate.toISOString().slice(0,10), expire_date_th: expireDate.toISOString().slice(0,10), expire_iso: expireDate.toISOString().slice(0,10), note: noteVal || null, inspector_name: inspectorVal || null, recorded_at: new Date().toISOString() };
+  if(inspectorVal) localStorage.setItem('crane_last_inspector', inspectorVal);
+  const targetItem = enriched.find(x => x._id === inspectTargetId);
+  overrides[inspectTargetId] = overrideRecord; saveOverrides(); enriched = buildEnriched();
+  closeModal('inspectOverlay'); render();
+
+  if(settings.webhookUrl){
+    const meta = { inspector_name: inspectorVal || null, type: targetItem ? targetItem.type : null, location: targetItem ? targetItem.location : null };
+    if(pendingPhotoBase64){ meta.photo_base64 = pendingPhotoBase64; meta.photo_mime = pendingPhotoMime; }
+    const result = await callBackend({action:'save_override', id: inspectTargetId, override: overrideRecord, meta});
+    if(result.ok && result.data && result.data.photo_url){
+      overrides[inspectTargetId].photo_url = result.data.photo_url;
+      saveOverrides(); enriched = buildEnriched(); render();
+    }
+  }
+});
+
+// Setup Settings
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  document.getElementById('webhookUrl').value = settings.webhookUrl;
+  document.getElementById('lineTarget').value = settings.lineTarget;
+  document.getElementById('autoAlertToggle').checked = settings.autoAlert;
+  document.getElementById('leadDays').value = settings.leadDays;
+  openModal('settingsOverlay');
+});
+document.querySelectorAll('.modal-close-settings').forEach(btn => btn.addEventListener('click', () => closeModal('settingsOverlay')));
+
+document.getElementById('saveSettings').addEventListener('click', () => {
+  settings.webhookUrl = document.getElementById('webhookUrl').value.trim();
+  settings.lineTarget = document.getElementById('lineTarget').value.trim();
+  settings.autoAlert = document.getElementById('autoAlertToggle').checked;
+  settings.leadDays = parseInt(document.getElementById('leadDays').value) || 30;
+  enriched = buildEnriched(); localStorage.setItem('crane_settings', JSON.stringify(settings));
+  render(); closeModal('settingsOverlay');
+  if(settings.webhookUrl){ syncOverridesFromBackend(); syncPlansFromBackend(); }
+});
+
+document.getElementById('testLineBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('testLineBtn');
+  btn.classList.add('opacity-50'); btn.style.pointerEvents = 'none';
+  const result = await sendToWebhook();
+  btn.classList.remove('opacity-50'); btn.style.pointerEvents = '';
+  if(result.reason === 'no_webhook') return;
+  if(result.ok){ alert('ส่งคำสั่งแจ้งเตือนไปยัง Webhook สำเร็จ — กรุณาตรวจสอบผลลัพธ์ใน LINE'); }
+  else{ alert('ส่งคำสั่งล้มเหลว: ' + (result.reason || ('HTTP ' + result.status)) + (result.data && result.data.note ? ('\n' + result.data.note) : '')); }
+});
+
+document.getElementById('exportExcelBtn').addEventListener('click', () => {
+  const rows = enriched.map(i => ({ Type: i.type, Location: i.location, Rating: i.rating, Brand: i.brand, SN: i.serial, Expire: i.expire_date, Status: badgeLabel[i.tier] }));
+  const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Data'); XLSX.writeFile(wb, `AlarmData_${TODAY.toISOString().slice(0,10)}.xlsx`);
+});
+</script>
+</body>
+</html>
