@@ -856,9 +856,27 @@ function renderHistoryLog(){
       <div class="md:col-span-2 flex items-center gap-2 min-w-0">
         ${r.photo_url ? `<img src="${r.photo_url}" class="w-9 h-9 rounded object-cover border border-slate-700 cursor-pointer flex-shrink-0" onclick="window.open('${r.photo_url}','_blank')">` : ''}
         ${r.note ? `<span class="text-xs italic text-slate-400 truncate" title="${r.note}">"${r.note}"</span>` : ''}
+        <button class="history-undo text-status-danger hover:text-white text-xs flex-shrink-0 ml-auto" data-id="${encodeURIComponent(r.id)}" title="ยกเลิกการบันทึกตรวจแล้ว">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        </button>
       </div>
     </div>
   `).join('');
+
+  listEl.querySelectorAll('.history-undo').forEach(el => el.addEventListener('click', () => undoOverride(decodeURIComponent(el.getAttribute('data-id')))));
+}
+
+async function undoOverride(id){
+  if(!confirm('ยืนยันยกเลิกการบันทึกว่าตรวจแล้วของรายการนี้? ระบบจะคืนสถานะกลับไปเป็นก่อนตรวจ')) return;
+  delete overrides[id];
+  saveOverrides();
+  enriched = buildEnriched();
+  render();
+  renderHistoryLog();
+  if(settings.webhookUrl){
+    const result = await callBackend({action:'delete_override', id});
+    if(!result.ok) console.warn('ลบบันทึกจาก backend ไม่สำเร็จ (ลบออกจากเบราว์เซอร์นี้แล้ว):', result);
+  }
 }
 
 document.querySelectorAll('.view-tab-btn').forEach(btn => {
